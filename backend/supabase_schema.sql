@@ -40,7 +40,11 @@ CREATE TABLE IF NOT EXISTS evaluations (
     setting_code INTEGER,
     appearance_emphasis_code INTEGER,
     performance_emphasis_code INTEGER,
-    evaluated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    evaluated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    -- One annotation per (content, user). Required at 1000-evaluator scale:
+    -- the application-level check-then-insert in /api/evaluate has a TOCTOU
+    -- race that this constraint closes by failing the second concurrent insert.
+    CONSTRAINT evaluations_content_user_unique UNIQUE (content_id, user_id)
 );
 
 -- Create indexes for better query performance
@@ -98,7 +102,8 @@ CREATE TABLE IF NOT EXISTS political_evaluations (
     sentiment_code INTEGER,
     framing_code INTEGER,
     argument_balance_code INTEGER,
-    evaluated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    evaluated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    CONSTRAINT political_evaluations_content_user_unique UNIQUE (content_id, user_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_political_evaluations_content_id ON political_evaluations(content_id);

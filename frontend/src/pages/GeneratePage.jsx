@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { Sparkles, Loader2, Image, Video, Music, AlertCircle } from 'lucide-react';
+import { Sparkles, Loader2, Image, Video, Music, AlertCircle, Lightbulb } from 'lucide-react';
 import { generateContent } from '../utils/api';
-import { MARKETING_CATEGORIES, MEDIA_TYPES, AREA_TYPES, POLITICAL_CATEGORIES } from '../utils/biasData';
+import { MARKETING_CATEGORIES, MEDIA_TYPES, AREA_TYPES, POLITICAL_CATEGORIES, PROMPT_SUGGESTIONS } from '../utils/biasData';
 import BiasEvaluationModal from '../components/BiasEvaluationModal';
 import PoliticalEvaluationModal from '../components/PoliticalEvaluationModal';
 import GeneratedContentGrid from '../components/GeneratedContentGrid';
@@ -189,6 +189,32 @@ export default function GeneratePage() {
           <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
             Step 4: Enter Your Prompt
           </label>
+
+          {/* Suggested prompts for the chosen category — click to fill */}
+          {category && PROMPT_SUGGESTIONS[areaType]?.[category] && (
+            <div className="mb-3 p-4 rounded-xl bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800/40">
+              <div className="flex items-center gap-2 mb-2 text-sm font-medium text-primary-700 dark:text-primary-300">
+                <Lightbulb className="w-4 h-4" />
+                <span>Suggested prompts for {category}</span>
+              </div>
+              <p className="text-xs text-gray-600 dark:text-gray-400 mb-3">
+                Click any suggestion to use it as your prompt. You can edit it after.
+              </p>
+              <div className="flex flex-col gap-2">
+                {PROMPT_SUGGESTIONS[areaType][category].map((suggestion, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => setPrompt(suggestion)}
+                    className="text-left text-sm px-3 py-2 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:border-primary-400 dark:hover:border-primary-500 hover:bg-primary-50/40 dark:hover:bg-primary-900/30 text-gray-700 dark:text-gray-200 transition-colors"
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           <textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}

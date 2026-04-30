@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+ import { useState, useEffect } from 'react';
 import { X, ChevronLeft, ChevronRight, Check, Info, Loader2 } from 'lucide-react';
 import { BIAS_OPTIONS } from '../utils/biasData';
 import { saveEvaluation } from '../utils/api';

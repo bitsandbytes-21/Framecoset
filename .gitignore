@@ -43,3 +43,6 @@ coverage/
 *.tmp
 *.temp
 .cache/
+
+# Local backend data file — never commit collected evaluations to git
+backend/bias_annotator_data.json

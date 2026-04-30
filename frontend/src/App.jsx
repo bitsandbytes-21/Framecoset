@@ -38,10 +38,10 @@ function SidebarContent({ onNavigate }) {
         </div>
         <div className="leading-tight">
           <h1 className="font-semibold text-[15px] text-gray-900 dark:text-white tracking-tight">
-            Bias Annotator
+            Framecoset
           </h1>
           <p className="text-[11px] uppercase tracking-wider text-gray-500 dark:text-gray-400">
-            AI Media Bias
+            AI Media Bias Annotator
           </p>
         </div>
       </div>
@@ -99,7 +99,7 @@ function AppContent() {
             <Beaker className="w-4 h-4 text-white" />
           </div>
           <span className="font-semibold text-gray-900 dark:text-white text-sm">
-            Bias Annotator
+            Framecoset
           </span>
         </div>
         <button

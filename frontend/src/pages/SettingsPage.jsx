@@ -60,7 +60,7 @@ export default function SettingsPage() {
           Appearance
         </h3>
         <p className="text-gray-500 dark:text-gray-400 text-sm mb-4">
-          Choose how Bias Annotator looks to you
+          Choose how Framecoset looks to you
         </p>
 
         <div className="grid grid-cols-3 gap-4">
@@ -164,10 +164,10 @@ export default function SettingsPage() {
             <Info className="w-5 h-5 text-primary-500 flex-shrink-0 mt-0.5" />
             <div>
               <p className="text-sm text-primary-800 dark:text-primary-300">
-                <strong>About Bias Annotator</strong>
+                <strong>About Framecoset</strong>
               </p>
               <p className="text-sm text-primary-700 dark:text-primary-400 mt-1">
-                Bias Annotator is a tool for evaluating bias in AI-generated media.
+                Framecoset is a tool for evaluating bias in AI-generated media.
                 It allows multiple users to generate content and evaluate representation
                 and attribute bias across different AI models.
               </p>

@@ -10,7 +10,7 @@ export default function AboutPage() {
           About this Project
         </h2>
         <p className="text-gray-600 dark:text-gray-400">
-          What Bias Annotator does and how it works.
+          What Framecoset does and how it works.
         </p>
       </div>
 
@@ -23,7 +23,7 @@ export default function AboutPage() {
           </h3>
         </div>
         <p className="text-sm md:text-base text-gray-600 dark:text-gray-400 leading-relaxed">
-          Bias Annotator generates content from multiple AI models across
+          Framecoset generates content from multiple AI models across
           different tiers and lets users compare and annotate the bias signals
           in the outputs side-by-side. The goal is to make subtle differences
           between models tangible, comparable, and measurable across both

@@ -586,87 +586,126 @@ async def get_categories():
     }
 
 
+async def _generate_one_model(
+    prompt: str,
+    media_type: str,
+    area_type: str,
+    category: Optional[str],
+    tier: str,
+    model_name: str,
+) -> Dict[str, Any]:
+    """Run a single model and return a tagged result.
+
+    Returns ``{"kind": "success", "content": {...}}`` on success or
+    ``{"kind": "failure", "failure": {...}}`` on any provider error. Never
+    raises — callers fan these out with ``asyncio.gather`` so a single
+    failing provider must not abort the whole batch.
+    """
+    content_id = str(uuid.uuid4())
+    try:
+        if media_type == "image":
+            if model_name in OPENAI_IMAGE_MODELS:
+                final_url = await generate_with_openai_model(prompt, model_name)
+            elif model_name in RECRAFT_IMAGE_MODELS:
+                final_url = await generate_with_recraft_model(prompt, content_id)
+            elif model_name in BFL_IMAGE_MODELS:
+                final_url = await generate_with_bfl_flux(prompt, content_id)
+            elif model_name in IDEOGRAM_IMAGE_MODELS:
+                final_url = await generate_with_ideogram_model(prompt, content_id)
+            elif model_name in FAL_IMAGE_MODELS:
+                final_url = await generate_with_fal_model(
+                    prompt, content_id, FAL_IMAGE_MODELS[model_name]
+                )
+            elif model_name in REPLICATE_IMAGE_MODELS:
+                final_url = await generate_with_replicate_model(
+                    prompt, REPLICATE_IMAGE_MODELS[model_name]
+                )
+            elif model_name in STABILITY_IMAGE_MODELS:
+                final_url = await generate_with_stability_model(prompt, content_id)
+            elif model_name in GOOGLE_IMAGE_MODELS:
+                final_url = await generate_with_google_imagen(prompt, content_id)
+            else:
+                return {"kind": "failure", "failure": {
+                    "model_name": model_name,
+                    "tier": tier,
+                    "reason": "not_configured",
+                    "message": "No provider configured for this model yet.",
+                }}
+        else:
+            # Placeholder for video/audio
+            final_url = f"https://via.placeholder.com/512x512?text={urllib.parse.quote(model_name)}"
+
+        content = {
+            "id": content_id,
+            "url": final_url,
+            "model_name": model_name,
+            "tier": tier,
+            "prompt": prompt,
+            "media_type": media_type,
+            "area_type": area_type,
+            "category": category,
+            "created_at": datetime.utcnow().isoformat(),
+        }
+        return {"kind": "success", "content": content}
+    except Exception as e:
+        print(f"Error generating with {model_name}: {e}")
+        failure = classify_generation_error(model_name, e)
+        failure["model_name"] = model_name
+        failure["tier"] = tier
+        return {"kind": "failure", "failure": failure}
+
+
 @app.post("/api/generate")
 async def generate_content(request: GenerationRequest):
-    """Generate content using AI models across tiers"""
-    generated_items = []
-    failures: List[Dict[str, str]] = []
+    """Generate content across all configured models — concurrently.
 
+    All ~12 model calls run in parallel via ``asyncio.gather`` so total
+    latency tracks the slowest provider (≈30s) instead of the sum of all
+    of them (≈3–5 min). Inserts into ``generated_content`` are batched
+    into a single Supabase round-trip after the fan-out completes.
+    """
     if request.media_type not in MODELS:
         raise HTTPException(status_code=400, detail="Invalid media type")
 
     models_by_tier = MODELS[request.media_type]
 
-    for tier, model_list in models_by_tier.items():
-        for model_name in model_list:
-            content_id = str(uuid.uuid4())
+    # Build the fan-out — one task per (tier, model) pair.
+    tasks = [
+        _generate_one_model(
+            request.prompt,
+            request.media_type,
+            request.area_type,
+            request.category,
+            tier,
+            model_name,
+        )
+        for tier, model_list in models_by_tier.items()
+        for model_name in model_list
+    ]
+
+    results = await asyncio.gather(*tasks, return_exceptions=False)
+
+    generated_items: List[Dict[str, Any]] = []
+    failures: List[Dict[str, str]] = []
+    for r in results:
+        if r.get("kind") == "success":
+            generated_items.append(r["content"])
+        else:
+            failures.append(r["failure"])
+
+    # Persist successful generations. One bulk insert beats N round-trips
+    # at 1000-evaluator scale.
+    if generated_items:
+        if supabase:
             try:
-                if request.media_type == "image":
-                    if model_name in OPENAI_IMAGE_MODELS:
-                        final_url = await generate_with_openai_model(request.prompt, model_name)
-                    elif model_name in RECRAFT_IMAGE_MODELS:
-                        final_url = await generate_with_recraft_model(request.prompt, content_id)
-                    elif model_name in BFL_IMAGE_MODELS:
-                        final_url = await generate_with_bfl_flux(request.prompt, content_id)
-                    elif model_name in IDEOGRAM_IMAGE_MODELS:
-                        final_url = await generate_with_ideogram_model(request.prompt, content_id)
-                    elif model_name in FAL_IMAGE_MODELS:
-                        final_url = await generate_with_fal_model(
-                            request.prompt, content_id, FAL_IMAGE_MODELS[model_name]
-                        )
-                    elif model_name in REPLICATE_IMAGE_MODELS:
-                        final_url = await generate_with_replicate_model(
-                            request.prompt, REPLICATE_IMAGE_MODELS[model_name]
-                        )
-                    elif model_name in STABILITY_IMAGE_MODELS:
-                        final_url = await generate_with_stability_model(request.prompt, content_id)
-                    elif model_name in GOOGLE_IMAGE_MODELS:
-                        final_url = await generate_with_google_imagen(request.prompt, content_id)
-                    else:
-                        failures.append({
-                            "model_name": model_name,
-                            "tier": tier,
-                            "reason": "not_configured",
-                            "message": "No provider configured for this model yet.",
-                        })
-                        continue
-                else:
-                    # Placeholder for video/audio
-                    final_url = f"https://via.placeholder.com/512x512?text={urllib.parse.quote(model_name)}"
-
-                content = {
-                    "id": content_id,
-                    "url": final_url,
-                    "model_name": model_name,
-                    "tier": tier,
-                    "prompt": request.prompt,
-                    "media_type": request.media_type,
-                    "area_type": request.area_type,
-                    "category": request.category,
-                    "created_at": datetime.utcnow().isoformat()
-                }
-
-                generated_items.append(content)
-
-                # Store in Supabase or in-memory
-                if supabase:
-                    try:
-                        supabase.table("generated_content").insert(content).execute()
-                    except Exception as e:
-                        print(f"Supabase insert error: {e}")
-                        in_memory_storage["generated_content"].append(content)
-                        save_data_to_file(in_memory_storage)
-                else:
-                    in_memory_storage["generated_content"].append(content)
-                    save_data_to_file(in_memory_storage)
-
+                supabase.table("generated_content").insert(generated_items).execute()
             except Exception as e:
-                print(f"Error generating with {model_name}: {e}")
-                failure = classify_generation_error(model_name, e)
-                failure["model_name"] = model_name
-                failure["tier"] = tier
-                failures.append(failure)
-                continue
+                print(f"Supabase bulk insert error: {e}")
+                in_memory_storage["generated_content"].extend(generated_items)
+                save_data_to_file(in_memory_storage)
+        else:
+            in_memory_storage["generated_content"].extend(generated_items)
+            save_data_to_file(in_memory_storage)
 
     return {
         "success": True,
@@ -676,22 +715,35 @@ async def generate_content(request: GenerationRequest):
     }
 
 
+def _is_unique_violation(err: Exception) -> bool:
+    """Detect a Postgres unique-constraint violation across supabase-py error shapes."""
+    msg = str(err).lower()
+    return "23505" in msg or "duplicate key" in msg or "unique constraint" in msg
+
+
 @app.get("/api/check-evaluation")
-async def check_evaluation(content_id: str, user_id: str):
-    """Check if content has been evaluated by a specific user"""
+async def check_evaluation(content_id: str, user_id: str, area_type: str = "marketing"):
+    """Check if content has been evaluated by a specific user.
+
+    ``area_type`` selects which evaluation table to inspect — defaults to
+    ``marketing`` to preserve the existing GeneratePage call sites that don't
+    pass it. Repository-side cards pass ``political`` for political content.
+    """
+    table = "political_evaluations" if area_type == "political" else "evaluations"
+    storage_key = "political_evaluations" if area_type == "political" else "evaluations"
+
     if supabase:
         try:
-            result = supabase.table("evaluations").select("id").eq("content_id", content_id).eq("user_id", user_id).execute()
+            result = supabase.table(table).select("id").eq("content_id", content_id).eq("user_id", user_id).execute()
             if result.data:
                 return {"evaluated": True, "count": len(result.data)}
         except Exception as e:
             print(f"Supabase check error: {e}")
-    
-    # Check in-memory storage
-    for eval in in_memory_storage["evaluations"]:
+
+    for eval in in_memory_storage.get(storage_key, []):
         if eval.get("content_id") == content_id and eval.get("user_id") == user_id:
             return {"evaluated": True, "count": 1}
-    
+
     return {"evaluated": False, "count": 0}
 
 
@@ -765,13 +817,18 @@ async def save_evaluation(evaluation: BiasEvaluation):
         try:
             supabase.table("evaluations").insert(eval_record).execute()
         except Exception as e:
+            # Concurrent submit: the unique (content_id, user_id) constraint won
+            # the race. Surface that as a 400 instead of falling back to local
+            # storage, otherwise we'd silently lose the conflict signal.
+            if _is_unique_violation(e):
+                raise HTTPException(status_code=400, detail="You have already evaluated this content")
             print(f"Supabase insert error: {e}")
             in_memory_storage["evaluations"].append(eval_record)
             save_data_to_file(in_memory_storage)
     else:
         in_memory_storage["evaluations"].append(eval_record)
         save_data_to_file(in_memory_storage)
-    
+
     return {"success": True, "evaluation_id": eval_id}
 
 
@@ -837,68 +894,144 @@ async def save_political_evaluation(evaluation: PoliticalEvaluation):
         try:
             supabase.table("political_evaluations").insert(eval_record).execute()
         except Exception as e:
+            if _is_unique_violation(e):
+                raise HTTPException(status_code=400, detail="You have already evaluated this content")
             print(f"Supabase insert error: {e}")
             in_memory_storage["political_evaluations"].append(eval_record)
             save_data_to_file(in_memory_storage)
     else:
         in_memory_storage["political_evaluations"].append(eval_record)
         save_data_to_file(in_memory_storage)
-    
+
     return {"success": True, "evaluation_id": eval_id}
+
+
+def _group_evaluations_by_content(evaluations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Collapse one row per evaluation into one entry per content_id.
+
+    Each returned entry carries the content metadata (taken from any one
+    eval row, since these fields are denormalized at insert time) plus the
+    full list of evaluations under ``evaluations``. Sorted by most recently
+    evaluated content first so the repository surfaces fresh activity.
+    """
+    grouped: Dict[str, Dict[str, Any]] = {}
+    for ev in evaluations:
+        cid = ev.get("content_id")
+        if not cid:
+            continue
+        entry = grouped.get(cid)
+        if entry is None:
+            entry = {
+                "id": cid,
+                "content_id": cid,
+                "url": ev.get("content_url"),
+                "prompt": ev.get("prompt"),
+                "model_name": ev.get("model_name"),
+                "tier": ev.get("tier"),
+                "media_type": ev.get("media_type"),
+                "area_type": ev.get("area_type"),
+                "category": ev.get("category"),
+                "evaluations": [],
+                "latest_evaluated_at": ev.get("evaluated_at") or "",
+            }
+            grouped[cid] = entry
+        entry["evaluations"].append(ev)
+        ts = ev.get("evaluated_at") or ""
+        if ts > (entry.get("latest_evaluated_at") or ""):
+            entry["latest_evaluated_at"] = ts
+
+    items = list(grouped.values())
+    for entry in items:
+        entry["evaluation_count"] = len(entry["evaluations"])
+        entry["evaluations"].sort(key=lambda e: e.get("evaluated_at") or "", reverse=True)
+    items.sort(key=lambda e: e.get("latest_evaluated_at") or "", reverse=True)
+    return items
 
 
 @app.get("/api/political-repository")
 async def get_political_repository():
-    """Get all political evaluated content"""
-    evaluations = []
-    
+    """Repository view of political content — grouped one entry per content_id.
+
+    Returns ``items`` (content-centric, with all evaluations attached) for the
+    new repository UI, plus ``evaluations`` (raw flat list) for any caller
+    that still wants the per-evaluation rows.
+    """
+    evaluations: List[Dict[str, Any]] = []
+
     if supabase:
         try:
             result = supabase.table("political_evaluations").select("*").order("evaluated_at", desc=True).execute()
-            evaluations = result.data
-        except:
-            evaluations = in_memory_storage.get("political_evaluations", [])
+            evaluations = result.data or []
+        except Exception:
+            evaluations = list(in_memory_storage.get("political_evaluations", []))
     else:
-        evaluations = in_memory_storage.get("political_evaluations", [])
-    
-    return {"evaluations": evaluations}
+        evaluations = list(in_memory_storage.get("political_evaluations", []))
+
+    return {
+        "items": _group_evaluations_by_content(evaluations),
+        "evaluations": evaluations,
+    }
 
 
 @app.get("/api/repository")
 async def get_repository():
-    """Get all evaluated content for the repository page"""
-    evaluations = []
-    
+    """Repository view of marketing content — grouped one entry per content_id."""
+    evaluations: List[Dict[str, Any]] = []
+
     if supabase:
         try:
             result = supabase.table("evaluations").select("*").order("evaluated_at", desc=True).execute()
-            evaluations = result.data
-        except:
-            evaluations = in_memory_storage["evaluations"]
+            evaluations = result.data or []
+        except Exception:
+            evaluations = list(in_memory_storage.get("evaluations", []))
     else:
-        evaluations = in_memory_storage["evaluations"]
-    
-    return {"evaluations": evaluations}
+        evaluations = list(in_memory_storage.get("evaluations", []))
+
+    return {
+        "items": _group_evaluations_by_content(evaluations),
+        "evaluations": evaluations,
+    }
 
 
-@app.get("/api/stats")
-async def get_stats():
-    """Get statistical analysis of bias evaluations"""
-    evaluations = []
-    
+@app.get("/api/content/{content_id}/evaluations")
+async def get_content_evaluations(content_id: str, area_type: str = "marketing"):
+    """Return every evaluation submitted against a single piece of content.
+
+    Used by the Stats page when an evaluator clicks an image to see how all
+    annotators scored it. ``area_type`` picks marketing vs political.
+    """
+    table = "political_evaluations" if area_type == "political" else "evaluations"
+    storage_key = "political_evaluations" if area_type == "political" else "evaluations"
+
+    rows: List[Dict[str, Any]] = []
     if supabase:
         try:
-            result = supabase.table("evaluations").select("*").execute()
-            evaluations = result.data
-        except:
-            evaluations = in_memory_storage["evaluations"]
+            result = (
+                supabase.table(table)
+                .select("*")
+                .eq("content_id", content_id)
+                .order("evaluated_at", desc=True)
+                .execute()
+            )
+            rows = result.data or []
+        except Exception as e:
+            print(f"Supabase content-evals fetch error: {e}")
+            rows = [
+                ev for ev in in_memory_storage.get(storage_key, [])
+                if ev.get("content_id") == content_id
+            ]
     else:
-        evaluations = in_memory_storage["evaluations"]
-    
-    if not evaluations:
-        return {"message": "No evaluations yet", "stats": {}}
-    
-    # Calculate statistics
+        rows = [
+            ev for ev in in_memory_storage.get(storage_key, [])
+            if ev.get("content_id") == content_id
+        ]
+        rows.sort(key=lambda e: e.get("evaluated_at") or "", reverse=True)
+
+    return {"content_id": content_id, "area_type": area_type, "evaluations": rows}
+
+
+def _compute_marketing_stats(evaluations: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Build the marketing stats payload for a given list of evaluations."""
     total = len(evaluations)
     stats = {
         "total_evaluations": total,
@@ -908,82 +1041,163 @@ async def get_stats():
         "gender_distribution": {},
         "race_distribution": {},
         "age_distribution": {},
+        "occupation_distribution": {},
+        "diversity_distribution": {},
         "activity_distribution": {},
         "setting_distribution": {},
+        "appearance_emphasis_distribution": {},
+        "performance_emphasis_distribution": {},
         "has_human_percentage": 0
     }
-    
-    # Count distributions
+
     human_count = 0
     for eval in evaluations:
-        # Media type
         mt = eval.get("media_type", "unknown")
         stats["by_media_type"][mt] = stats["by_media_type"].get(mt, 0) + 1
-        
-        # Tier
+
         tier = eval.get("tier", "unknown")
         stats["by_tier"][tier] = stats["by_tier"].get(tier, 0) + 1
-        
-        # Category
+
         cat = eval.get("category") or "N/A"
         stats["by_category"][cat] = stats["by_category"].get(cat, 0) + 1
-        
-        # Has human
+
         if eval.get("has_human"):
             human_count += 1
-            
-            # Gender
+
             gc = eval.get("gender_code")
             if gc is not None:
                 label = BIAS_CODES["gender"].get(gc, "Unknown")
                 stats["gender_distribution"][label] = stats["gender_distribution"].get(label, 0) + 1
-            
-            # Race
+
             rc = eval.get("race_code")
             if rc is not None:
                 label = BIAS_CODES["race"].get(rc, "Unknown")
                 stats["race_distribution"][label] = stats["race_distribution"].get(label, 0) + 1
-            
-            # Age
+
             ac = eval.get("age_code")
             if ac is not None:
                 label = BIAS_CODES["age"].get(ac, "Unknown")
                 stats["age_distribution"][label] = stats["age_distribution"].get(label, 0) + 1
-            
-            # Activity
+
+            oc = eval.get("occupation_code")
+            if oc is not None:
+                label = BIAS_CODES["occupation"].get(oc, "Unknown")
+                stats["occupation_distribution"][label] = stats["occupation_distribution"].get(label, 0) + 1
+
+            dc = eval.get("diversity_code")
+            if dc is not None:
+                label = BIAS_CODES["diversity"].get(dc, "Unknown")
+                stats["diversity_distribution"][label] = stats["diversity_distribution"].get(label, 0) + 1
+
             act = eval.get("activity_code")
             if act is not None:
                 label = BIAS_CODES["activity"].get(act, "Unknown")
                 stats["activity_distribution"][label] = stats["activity_distribution"].get(label, 0) + 1
-            
-            # Setting
+
             st = eval.get("setting_code")
             if st is not None:
                 label = BIAS_CODES["setting"].get(st, "Unknown")
                 stats["setting_distribution"][label] = stats["setting_distribution"].get(label, 0) + 1
-    
+
+            aec = eval.get("appearance_emphasis_code")
+            if aec is not None:
+                label = BIAS_CODES["appearance_emphasis"].get(aec, "Unknown")
+                stats["appearance_emphasis_distribution"][label] = stats["appearance_emphasis_distribution"].get(label, 0) + 1
+
+            pec = eval.get("performance_emphasis_code")
+            if pec is not None:
+                label = BIAS_CODES["performance_emphasis"].get(pec, "Unknown")
+                stats["performance_emphasis_distribution"][label] = stats["performance_emphasis_distribution"].get(label, 0) + 1
+
     stats["has_human_percentage"] = round((human_count / total) * 100, 2) if total > 0 else 0
+    return stats
 
-    return {"stats": stats}
 
+@app.get("/api/stats")
+async def get_stats(category: Optional[str] = None, prompt: Optional[str] = None):
+    """Get statistical analysis of bias evaluations.
 
-@app.get("/api/political-stats")
-async def get_political_stats():
-    """Get statistical analysis of political bias evaluations"""
+    If ``category`` is provided, the top-level stats are filtered to evaluations
+    in that category. If ``prompt`` is also provided, stats are further narrowed
+    to evaluations of that exact prompt. The response always includes
+    ``by_category_breakdown`` so the frontend can render a per-category
+    comparison without a second call, and (when ``category`` is set) a
+    ``prompts_for_category`` list of distinct prompts in that category with
+    their eval counts.
+    """
     evaluations = []
 
     if supabase:
         try:
-            result = supabase.table("political_evaluations").select("*").execute()
+            result = supabase.table("evaluations").select("*").execute()
             evaluations = result.data
         except:
-            evaluations = in_memory_storage.get("political_evaluations", [])
+            evaluations = in_memory_storage["evaluations"]
     else:
-        evaluations = in_memory_storage.get("political_evaluations", [])
+        evaluations = in_memory_storage["evaluations"]
 
     if not evaluations:
         return {"message": "No evaluations yet", "stats": {}}
 
+    # Build per-category breakdown across the full dataset (so it stays consistent
+    # whether or not the caller is currently filtering).
+    by_category_breakdown: Dict[str, Any] = {}
+    grouped: Dict[str, List[Dict[str, Any]]] = {}
+    for ev in evaluations:
+        key = ev.get("category") or "N/A"
+        grouped.setdefault(key, []).append(ev)
+    for cat, items in grouped.items():
+        by_category_breakdown[cat] = _compute_marketing_stats(items)
+
+    # Compose category + prompt filters (prompt only applies inside a category).
+    prompts_for_category: Optional[List[Dict[str, Any]]] = None
+    if category:
+        in_category = [e for e in evaluations if (e.get("category") or "N/A") == category]
+        # Build the distinct-prompts list before applying the prompt filter.
+        prompt_counts: Dict[str, int] = {}
+        for e in in_category:
+            p = e.get("prompt") or ""
+            prompt_counts[p] = prompt_counts.get(p, 0) + 1
+        prompts_for_category = [
+            {"prompt": p, "count": c}
+            for p, c in sorted(prompt_counts.items(), key=lambda kv: (-kv[1], kv[0]))
+        ]
+
+        if prompt:
+            filtered = [e for e in in_category if (e.get("prompt") or "") == prompt]
+        else:
+            filtered = in_category
+
+        if not filtered:
+            empty_stats = {
+                "total_evaluations": 0,
+                "by_category_breakdown": by_category_breakdown,
+                "filtered_category": category,
+                "prompts_for_category": prompts_for_category,
+            }
+            if prompt:
+                empty_stats["filtered_prompt"] = prompt
+                empty_stats["evaluations"] = []
+            return {"stats": empty_stats}
+        stats = _compute_marketing_stats(filtered)
+    else:
+        stats = _compute_marketing_stats(evaluations)
+
+    stats["by_category_breakdown"] = by_category_breakdown
+    if category:
+        stats["filtered_category"] = category
+        stats["prompts_for_category"] = prompts_for_category
+    if prompt:
+        stats["filtered_prompt"] = prompt
+        # Attach the raw matching evals so the frontend can render the image
+        # gallery + raw counts view without a second round-trip.
+        stats["evaluations"] = filtered
+
+    return {"stats": stats}
+
+
+def _compute_political_stats(evaluations: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Build the political stats payload for a given list of evaluations."""
     total = len(evaluations)
     stats = {
         "total_evaluations": total,
@@ -1026,7 +1240,287 @@ async def get_political_stats():
             label = BIAS_CODES["argument_balance"].get(ab, "Unknown")
             stats["argument_balance_distribution"][label] = stats["argument_balance_distribution"].get(label, 0) + 1
 
+    return stats
+
+
+@app.get("/api/political-stats")
+async def get_political_stats(category: Optional[str] = None, prompt: Optional[str] = None):
+    """Get statistical analysis of political bias evaluations.
+
+    Mirrors ``/api/stats``: optional ``category`` (topic) filter, optional
+    ``prompt`` filter that composes with it, plus a ``by_category_breakdown``
+    always included and a ``prompts_for_category`` list when a topic is set.
+    """
+    evaluations = []
+
+    if supabase:
+        try:
+            result = supabase.table("political_evaluations").select("*").execute()
+            evaluations = result.data
+        except:
+            evaluations = in_memory_storage.get("political_evaluations", [])
+    else:
+        evaluations = in_memory_storage.get("political_evaluations", [])
+
+    if not evaluations:
+        return {"message": "No evaluations yet", "stats": {}}
+
+    by_category_breakdown: Dict[str, Any] = {}
+    grouped: Dict[str, List[Dict[str, Any]]] = {}
+    for ev in evaluations:
+        key = ev.get("category") or "N/A"
+        grouped.setdefault(key, []).append(ev)
+    for cat, items in grouped.items():
+        by_category_breakdown[cat] = _compute_political_stats(items)
+
+    prompts_for_category: Optional[List[Dict[str, Any]]] = None
+    if category:
+        in_category = [e for e in evaluations if (e.get("category") or "N/A") == category]
+        prompt_counts: Dict[str, int] = {}
+        for e in in_category:
+            p = e.get("prompt") or ""
+            prompt_counts[p] = prompt_counts.get(p, 0) + 1
+        prompts_for_category = [
+            {"prompt": p, "count": c}
+            for p, c in sorted(prompt_counts.items(), key=lambda kv: (-kv[1], kv[0]))
+        ]
+
+        if prompt:
+            filtered = [e for e in in_category if (e.get("prompt") or "") == prompt]
+        else:
+            filtered = in_category
+
+        if not filtered:
+            empty_stats = {
+                "total_evaluations": 0,
+                "by_category_breakdown": by_category_breakdown,
+                "filtered_category": category,
+                "prompts_for_category": prompts_for_category,
+            }
+            if prompt:
+                empty_stats["filtered_prompt"] = prompt
+                empty_stats["evaluations"] = []
+            return {"stats": empty_stats}
+        stats = _compute_political_stats(filtered)
+    else:
+        stats = _compute_political_stats(evaluations)
+
+    stats["by_category_breakdown"] = by_category_breakdown
+    if category:
+        stats["filtered_category"] = category
+        stats["prompts_for_category"] = prompts_for_category
+    if prompt:
+        stats["filtered_prompt"] = prompt
+        stats["evaluations"] = filtered
+
     return {"stats": stats}
+
+
+def _label_or_blank(scheme: str, code) -> str:
+    if code is None:
+        return ""
+    return BIAS_CODES.get(scheme, {}).get(code, "")
+
+
+def _build_marketing_workbook(evaluations: List[Dict[str, Any]]):
+    """Return an openpyxl Workbook of marketing evaluations (raw + decoded labels).
+
+    Rows where the annotator marked ``has_human`` as False have the
+    representation/attribute fields filled with ``N/A`` instead of left
+    blank — the bias schemes don't apply when there's no person, so this
+    distinguishes "intentionally not applicable" from "missing data".
+    """
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Marketing Evaluations"
+
+    headers = [
+        "evaluation_id", "content_id", "user_id", "evaluated_at",
+        "media_type", "area_type", "category", "model_name", "tier",
+        "prompt", "content_url",
+        "has_human", "human_count",
+        "gender_code", "gender_label",
+        "race_code", "race_label",
+        "age_code", "age_label",
+        "occupation_code", "occupation_label",
+        "diversity_code", "diversity_label",
+        "activity_code", "activity_label",
+        "setting_code", "setting_label",
+        "appearance_emphasis_code", "appearance_emphasis_label",
+        "performance_emphasis_code", "performance_emphasis_label",
+    ]
+    ws.append(headers)
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+
+    NA = "N/A"
+
+    def code(value, no_human: bool):
+        if no_human:
+            return NA
+        return value
+
+    def label(scheme: str, value, no_human: bool):
+        if no_human:
+            return NA
+        return _label_or_blank(scheme, value)
+
+    for ev in evaluations:
+        no_human = ev.get("has_human") is False
+
+        ws.append([
+            ev.get("id"), ev.get("content_id"), ev.get("user_id"), ev.get("evaluated_at"),
+            ev.get("media_type"), ev.get("area_type"), ev.get("category"),
+            ev.get("model_name"), ev.get("tier"),
+            ev.get("prompt"), ev.get("content_url"),
+            ev.get("has_human"),
+            code(ev.get("human_count"), no_human),
+            code(ev.get("gender_code"), no_human), label("gender", ev.get("gender_code"), no_human),
+            code(ev.get("race_code"), no_human), label("race", ev.get("race_code"), no_human),
+            code(ev.get("age_code"), no_human), label("age", ev.get("age_code"), no_human),
+            code(ev.get("occupation_code"), no_human), label("occupation", ev.get("occupation_code"), no_human),
+            code(ev.get("diversity_code"), no_human), label("diversity", ev.get("diversity_code"), no_human),
+            code(ev.get("activity_code"), no_human), label("activity", ev.get("activity_code"), no_human),
+            code(ev.get("setting_code"), no_human), label("setting", ev.get("setting_code"), no_human),
+            code(ev.get("appearance_emphasis_code"), no_human),
+            label("appearance_emphasis", ev.get("appearance_emphasis_code"), no_human),
+            code(ev.get("performance_emphasis_code"), no_human),
+            label("performance_emphasis", ev.get("performance_emphasis_code"), no_human),
+        ])
+
+    return wb
+
+
+def _build_political_workbook(evaluations: List[Dict[str, Any]]):
+    """Return an openpyxl Workbook of political evaluations (raw + decoded labels)."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Political Evaluations"
+
+    headers = [
+        "evaluation_id", "content_id", "user_id", "evaluated_at",
+        "media_type", "area_type", "category", "model_name", "tier",
+        "prompt", "content_url",
+        "stance_code", "stance_label",
+        "sentiment_code", "sentiment_label",
+        "framing_code", "framing_label",
+        "argument_balance_code", "argument_balance_label",
+    ]
+    ws.append(headers)
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+
+    for ev in evaluations:
+        ws.append([
+            ev.get("id"), ev.get("content_id"), ev.get("user_id"), ev.get("evaluated_at"),
+            ev.get("media_type"), ev.get("area_type"), ev.get("category"),
+            ev.get("model_name"), ev.get("tier"),
+            ev.get("prompt"), ev.get("content_url"),
+            ev.get("stance_code"), _label_or_blank("stance", ev.get("stance_code")),
+            ev.get("sentiment_code"), _label_or_blank("sentiment", ev.get("sentiment_code")),
+            ev.get("framing_code"), _label_or_blank("framing", ev.get("framing_code")),
+            ev.get("argument_balance_code"), _label_or_blank("argument_balance", ev.get("argument_balance_code")),
+        ])
+
+    return wb
+
+
+@app.get("/api/export/{area_type}")
+async def export_evaluations(
+    area_type: str,
+    category: Optional[str] = None,
+    prompt: Optional[str] = None,
+):
+    """Download raw evaluation data as an .xlsx workbook.
+
+    ``area_type`` must be ``marketing``, ``political``, or ``all``. Optional
+    ``category`` and ``prompt`` filters compose to narrow the rows that are
+    written to the workbook.
+    """
+    from io import BytesIO
+    from fastapi.responses import StreamingResponse
+
+    area_type = (area_type or "").lower()
+    if area_type not in ("marketing", "political", "all"):
+        raise HTTPException(status_code=400, detail="Invalid area_type. Use 'marketing', 'political', or 'all'.")
+
+    # Pull marketing evaluations
+    marketing_evals: List[Dict[str, Any]] = []
+    if area_type in ("marketing", "all"):
+        if supabase:
+            try:
+                result = supabase.table("evaluations").select("*").order("evaluated_at", desc=True).execute()
+                marketing_evals = result.data or []
+            except Exception:
+                marketing_evals = list(in_memory_storage.get("evaluations", []))
+        else:
+            marketing_evals = list(in_memory_storage.get("evaluations", []))
+        if category:
+            marketing_evals = [e for e in marketing_evals if (e.get("category") or "N/A") == category]
+        if prompt:
+            marketing_evals = [e for e in marketing_evals if (e.get("prompt") or "") == prompt]
+
+    # Pull political evaluations
+    political_evals: List[Dict[str, Any]] = []
+    if area_type in ("political", "all"):
+        if supabase:
+            try:
+                result = supabase.table("political_evaluations").select("*").order("evaluated_at", desc=True).execute()
+                political_evals = result.data or []
+            except Exception:
+                political_evals = list(in_memory_storage.get("political_evaluations", []))
+        else:
+            political_evals = list(in_memory_storage.get("political_evaluations", []))
+        if category:
+            political_evals = [e for e in political_evals if (e.get("category") or "N/A") == category]
+        if prompt:
+            political_evals = [e for e in political_evals if (e.get("prompt") or "") == prompt]
+
+    # Build the workbook(s)
+    if area_type == "marketing":
+        wb = _build_marketing_workbook(marketing_evals)
+        filename_stem = "marketing_evaluations"
+    elif area_type == "political":
+        wb = _build_political_workbook(political_evals)
+        filename_stem = "political_evaluations"
+    else:
+        # area_type == "all" — combine both into one workbook with two sheets
+        from openpyxl import Workbook
+        wb = Workbook()
+        # Replace the default sheet with marketing sheet
+        default_ws = wb.active
+        wb.remove(default_ws)
+        wb_m = _build_marketing_workbook(marketing_evals)
+        wb_p = _build_political_workbook(political_evals)
+        # Copy sheets across
+        for src_wb in (wb_m, wb_p):
+            src_ws = src_wb.active
+            new_ws = wb.create_sheet(title=src_ws.title)
+            for row in src_ws.iter_rows(values_only=True):
+                new_ws.append(row)
+        filename_stem = "all_evaluations"
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    suffix = f"_{category}" if category else ""
+    filename = f"{filename_stem}{suffix}_{timestamp}.xlsx"
+    # Sanitize filename — replace anything that's not alnum/dot/dash/underscore
+    safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in filename)
+
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{safe}"'},
+    )
 
 
 @app.get("/api/image-proxy")

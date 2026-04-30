@@ -11,3 +11,4 @@ openai>=1.30.0
 replicate>=0.28.0
 google-genai>=1.0.0
 fal-client>=0.5.0
+openpyxl>=3.1.0

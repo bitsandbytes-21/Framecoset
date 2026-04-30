@@ -272,7 +272,7 @@ export default function GeneratedContentGrid({ content, onEvaluate }) {
           <div className="text-sm">
             <p className="font-semibold">No models returned an image for this prompt.</p>
             <p className="mt-1">
-              Each provider's status is shown below. The most common causes are an exhausted billing plan
+              Each provider&apos;s status is shown below. The most common causes are an exhausted billing plan
               or an invalid API key — update the relevant key in the backend <code>.env</code> and try again.
             </p>
           </div>
