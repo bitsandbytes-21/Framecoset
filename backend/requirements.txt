@@ -9,6 +9,6 @@ pydantic==2.9.2
 aiohttp==3.10.10
 openai==1.51.0
 replicate==0.34.1
-google-genai==1.10.0
+google-genai==1.0.0
 fal-client==0.5.6
 openpyxl==3.1.5
