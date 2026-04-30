@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://https://project-50k5v.vercel.app/api/:path*"
+      "destination": "https://framecoset.onrender.com/api/:path*"
     }
   ]
 }
