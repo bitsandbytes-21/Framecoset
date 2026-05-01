@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { X, Loader2, Users } from 'lucide-react';
+import { X, Loader2, Users, ClipboardCheck } from 'lucide-react';
 import { BIAS_OPTIONS, POLITICAL_BIAS_OPTIONS } from '../utils/biasData';
 import { getContentEvaluations } from '../utils/api';
 
@@ -115,6 +115,8 @@ export default function ImageEvaluationsModal({
   initialEvaluations,
   isPolitical = false,
   onClose,
+  onEvaluate,
+  currentUserId,
 }) {
   const [imageSrc, setImageSrc] = useState(null);
   const [imageError, setImageError] = useState(false);
@@ -232,6 +234,27 @@ export default function ImageEvaluationsModal({
                   <p className="text-gray-900 dark:text-white">{content.prompt}</p>
                 </div>
               </div>
+              {onEvaluate && (() => {
+                const userHasEvaluated = currentUserId
+                  ? evaluations.some((e) => e.user_id === currentUserId)
+                  : false;
+                return (
+                  <button
+                    type="button"
+                    onClick={() => onEvaluate(content)}
+                    disabled={userHasEvaluated}
+                    className={`mt-4 w-full flex items-center justify-center gap-2 py-2 text-sm font-medium rounded-lg transition-colors ${
+                      userHasEvaluated
+                        ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed'
+                        : 'bg-primary-500 text-white hover:bg-primary-600'
+                    }`}
+                    title={userHasEvaluated ? 'You have already evaluated this image' : 'Submit your own bias evaluation'}
+                  >
+                    <ClipboardCheck className="w-4 h-4" />
+                    {userHasEvaluated ? 'Already evaluated by you' : 'Evaluate this image'}
+                  </button>
+                );
+              })()}
             </div>
 
             {/* Evaluations table */}

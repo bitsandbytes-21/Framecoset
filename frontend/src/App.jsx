@@ -5,25 +5,19 @@ import {
   Moon,
   Beaker,
   Archive,
-  BarChart3,
-  Settings,
   Menu,
   X,
   User,
 } from 'lucide-react';
 import GeneratePage from './pages/GeneratePage';
 import RepositoryPage from './pages/RepositoryPage';
-import StatsPage from './pages/StatsPage';
-import SettingsPage from './pages/SettingsPage';
 import AboutPage from './pages/AboutPage';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
 
 const navItems = [
   { path: '/', label: 'Generate', icon: Beaker },
   { path: '/repository', label: 'Repository', icon: Archive },
-  { path: '/stats', label: 'Stats', icon: BarChart3 },
   { path: '/about', label: 'About', icon: User },
-  { path: '/settings', label: 'Settings', icon: Settings },
 ];
 
 function SidebarContent({ onNavigate }) {
@@ -143,9 +137,7 @@ function AppContent() {
             <Routes>
               <Route path="/" element={<GeneratePage />} />
               <Route path="/repository" element={<RepositoryPage />} />
-              <Route path="/stats" element={<StatsPage />} />
               <Route path="/about" element={<AboutPage />} />
-              <Route path="/settings" element={<SettingsPage />} />
             </Routes>
           </div>
         </main>

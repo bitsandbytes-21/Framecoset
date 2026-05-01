@@ -5,7 +5,128 @@ import { getStats, getPoliticalStats, downloadEvaluationsExcel } from '../utils/
 import { MARKETING_CATEGORIES, POLITICAL_CATEGORIES } from '../utils/biasData';
 import ImageEvaluationsModal from '../components/ImageEvaluationsModal';
 
-const COLORS = ['#18181b', '#3f3f46', '#52525b', '#71717a', '#a1a1aa', '#d4d4d8', '#e4e4e7', '#f4f4f5'];
+// Vibrant fallback palette for any distribution we don't have a per-label map
+// for. Used positionally so adjacent slices stay visually distinct.
+const FALLBACK_PALETTE = [
+  '#3b82f6', '#ec4899', '#f59e0b', '#10b981', '#a855f7',
+  '#06b6d4', '#f97316', '#84cc16', '#ef4444', '#14b8a6',
+];
+
+// Per-distribution color maps keyed by lowercased label. Each map tries to
+// pick a color that matches what the label *means* (male=blue, female=pink,
+// White=light pink, Black=brown, etc.) so a glance at a pie chart conveys
+// information without reading the legend.
+const DISTRIBUTION_PALETTES = {
+  gender: {
+    'male': '#3b82f6',
+    'female': '#ec4899',
+    'mixed': '#a855f7',
+    'ambiguous': '#f59e0b',
+    'no person': '#9ca3af',
+  },
+  race: {
+    'white': '#fbcfe8',
+    'black': '#92400e',
+    'asian': '#facc15',
+    'latino': '#f97316',
+    'hispanic': '#f97316',
+    'hispanic/latino': '#f97316',
+    'middle eastern': '#a16207',
+    'south asian': '#7c3aed',
+    'native american': '#dc2626',
+    'pacific islander': '#0ea5e9',
+    'ambiguous': '#14b8a6',
+    'no figure': '#9ca3af',
+  },
+  age: {
+    'child': '#fbbf24',
+    'young adult (18-34)': '#22d3ee',
+    'young adult': '#22d3ee',
+    'middle-aged (35-54)': '#6366f1',
+    'middle-aged': '#6366f1',
+    'older adult (55+)': '#a855f7',
+    'older adult': '#a855f7',
+    'ambiguous': '#14b8a6',
+    'no figure': '#9ca3af',
+  },
+  occupation: {
+    'leadership/executive': '#4f46e5',
+    'professional': '#3b82f6',
+    'service worker': '#f97316',
+    'caregiver': '#ec4899',
+    'ambiguous': '#14b8a6',
+    'no occupation visible': '#9ca3af',
+  },
+  diversity: {
+    'single group only': '#ef4444',
+    'two groups': '#f59e0b',
+    'three or more': '#10b981',
+    'one person': '#3b82f6',
+    'no figure': '#9ca3af',
+  },
+  activity: {
+    'active user': '#10b981',
+    'passive display': '#a855f7',
+    'caregiver/domestic': '#ec4899',
+    'professional/expert': '#4f46e5',
+    'athletic/performance': '#f97316',
+    'aesthetic object': '#f43f5e',
+    'no figure': '#9ca3af',
+  },
+  setting: {
+    'home/domestic': '#f472b6',
+    'outdoors/nature': '#22c55e',
+    'professional/office': '#3b82f6',
+    'gym/athletic': '#fb923c',
+    'abstract/no setting': '#64748b',
+    'luxury/high-end': '#f59e0b',
+  },
+  appearance_emphasis: {
+    'not emphasized': '#10b981',
+    'appearance emphasized': '#f43f5e',
+  },
+  performance_emphasis: {
+    'not emphasized': '#64748b',
+    'performance emphasized': '#06b6d4',
+  },
+  stance: {
+    'strongly oppose': '#b91c1c',
+    'somewhat oppose': '#ef4444',
+    'neutral / mixed': '#9ca3af',
+    'neutral/mixed': '#9ca3af',
+    'somewhat support': '#10b981',
+    'strongly support': '#047857',
+  },
+  sentiment: {
+    'negative': '#ef4444',
+    'neutral / mixed': '#9ca3af',
+    'neutral/mixed': '#9ca3af',
+    'positive': '#10b981',
+  },
+  framing: {
+    'economic': '#10b981',
+    'security / public safety': '#ef4444',
+    'rights / liberties': '#3b82f6',
+    'moral / ethical': '#a855f7',
+    'public health / welfare': '#ec4899',
+    'political / institutional': '#f59e0b',
+    'mixed / no dominant frame': '#64748b',
+  },
+  argument_balance: {
+    'one-sided': '#ef4444',
+    'mostly one-sided': '#f59e0b',
+    'balanced': '#10b981',
+  },
+};
+
+function colorForLabel(colorKey, label, index) {
+  const map = colorKey ? DISTRIBUTION_PALETTES[colorKey] : null;
+  if (map) {
+    const key = String(label ?? '').trim().toLowerCase();
+    if (map[key]) return map[key];
+  }
+  return FALLBACK_PALETTE[index % FALLBACK_PALETTE.length];
+}
 
 function StatCard({ title, value, subtitle, icon: Icon, color = 'primary' }) {
   const colorClasses = {
@@ -34,7 +155,7 @@ function StatCard({ title, value, subtitle, icon: Icon, color = 'primary' }) {
   );
 }
 
-function DistributionChart({ title, data, colors = COLORS }) {
+function DistributionChart({ title, data, colorKey }) {
   if (!data || Object.keys(data).length === 0) {
     return (
       <div className="stat-card">
@@ -51,24 +172,29 @@ function DistributionChart({ title, data, colors = COLORS }) {
   return (
     <div className="stat-card">
       <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">{title}</h3>
-      <div className="h-64">
+      <div className="h-80">
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
             <Pie
               data={chartData}
               cx="50%"
-              cy="50%"
+              cy="42%"
               labelLine={false}
-              label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-              outerRadius={80}
+              label={({ percent }) => (percent > 0.04 ? `${(percent * 100).toFixed(0)}%` : '')}
+              outerRadius={75}
               fill="#8884d8"
               dataKey="value"
             >
               {chartData.map((entry, index) => (
-                <Cell key={`cell-${index}`} fill={colors[index % colors.length]} />
+                <Cell key={`cell-${index}`} fill={colorForLabel(colorKey, entry.name, index)} />
               ))}
             </Pie>
-            <Tooltip />
+            <Tooltip formatter={(value, name) => [`${value}`, name]} />
+            <Legend
+              verticalAlign="bottom"
+              align="center"
+              wrapperStyle={{ fontSize: 12, paddingTop: 8, lineHeight: '18px' }}
+            />
           </PieChart>
         </ResponsiveContainer>
       </div>
@@ -76,7 +202,7 @@ function DistributionChart({ title, data, colors = COLORS }) {
   );
 }
 
-function BarChartComponent({ title, data, colors = COLORS }) {
+function BarChartComponent({ title, data, colorKey }) {
   if (!data || Object.keys(data).length === 0) {
     return (
       <div className="stat-card">
@@ -89,16 +215,27 @@ function BarChartComponent({ title, data, colors = COLORS }) {
   }
 
   const chartData = Object.entries(data).map(([name, value]) => ({ name, value }));
+  // Wider YAxis when any label is long (e.g. "Reproductive Rights",
+  // "No occupation visible") so the text isn't truncated mid-word.
+  const longestLabel = chartData.reduce((m, e) => Math.max(m, String(e.name).length), 0);
+  const yAxisWidth = Math.min(220, Math.max(110, longestLabel * 7));
 
   return (
     <div className="stat-card">
       <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">{title}</h3>
       <div className="h-64">
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={chartData} layout="vertical">
+          <BarChart data={chartData} layout="vertical" margin={{ top: 4, right: 16, bottom: 4, left: 4 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-            <XAxis type="number" stroke="#9ca3af" />
-            <YAxis dataKey="name" type="category" width={100} stroke="#9ca3af" tick={{ fontSize: 12 }} />
+            <XAxis type="number" stroke="#9ca3af" allowDecimals={false} />
+            <YAxis
+              dataKey="name"
+              type="category"
+              width={yAxisWidth}
+              stroke="#9ca3af"
+              tick={{ fontSize: 12 }}
+              interval={0}
+            />
             <Tooltip
               contentStyle={{
                 backgroundColor: '#1f2937',
@@ -107,7 +244,11 @@ function BarChartComponent({ title, data, colors = COLORS }) {
                 color: '#fff'
               }}
             />
-            <Bar dataKey="value" fill="#0ea5e9" radius={[0, 4, 4, 0]} />
+            <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+              {chartData.map((entry, index) => (
+                <Cell key={`cell-${index}`} fill={colorForLabel(colorKey, entry.name, index)} />
+              ))}
+            </Bar>
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -492,7 +633,7 @@ function PromptDetailView({ stats, isPolitical }) {
 }
 
 
-function CategoryBreakdownSection({ breakdown, isPolitical }) {
+export function CategoryBreakdownSection({ breakdown, isPolitical }) {
   if (!breakdown || Object.keys(breakdown).length === 0) return null;
   const categories = Object.keys(breakdown).sort();
   return (
@@ -519,7 +660,7 @@ function CategoryBreakdownSection({ breakdown, isPolitical }) {
   );
 }
 
-function MarketingStatsView({ stats }) {
+export function MarketingStatsView({ stats }) {
   return (
     <>
       {/* Overview Stats */}
@@ -556,10 +697,12 @@ function MarketingStatsView({ stats }) {
         <DistributionChart
           title="Gender Distribution"
           data={stats.gender_distribution}
+          colorKey="gender"
         />
         <DistributionChart
           title="Race Distribution"
           data={stats.race_distribution}
+          colorKey="race"
         />
       </div>
 
@@ -568,10 +711,12 @@ function MarketingStatsView({ stats }) {
         <DistributionChart
           title="Age Distribution"
           data={stats.age_distribution}
+          colorKey="age"
         />
         <DistributionChart
           title="Activity Distribution"
           data={stats.activity_distribution}
+          colorKey="activity"
         />
       </div>
 
@@ -580,10 +725,12 @@ function MarketingStatsView({ stats }) {
         <DistributionChart
           title="Occupation Distribution"
           data={stats.occupation_distribution}
+          colorKey="occupation"
         />
         <DistributionChart
           title="Diversity Distribution"
           data={stats.diversity_distribution}
+          colorKey="diversity"
         />
       </div>
 
@@ -592,10 +739,12 @@ function MarketingStatsView({ stats }) {
         <DistributionChart
           title="Appearance Emphasis"
           data={stats.appearance_emphasis_distribution}
+          colorKey="appearance_emphasis"
         />
         <DistributionChart
           title="Performance Emphasis"
           data={stats.performance_emphasis_distribution}
+          colorKey="performance_emphasis"
         />
       </div>
 
@@ -616,13 +765,14 @@ function MarketingStatsView({ stats }) {
         <BarChartComponent
           title="Setting/Environment Distribution"
           data={stats.setting_distribution}
+          colorKey="setting"
         />
       </div>
     </>
   );
 }
 
-function PoliticalStatsView({ stats }) {
+export function PoliticalStatsView({ stats }) {
   return (
     <>
       {/* Overview Stats */}
@@ -658,10 +808,12 @@ function PoliticalStatsView({ stats }) {
         <DistributionChart
           title="Stance Distribution"
           data={stats.stance_distribution}
+          colorKey="stance"
         />
         <DistributionChart
           title="Sentiment Distribution"
           data={stats.sentiment_distribution}
+          colorKey="sentiment"
         />
       </div>
 
@@ -670,10 +822,12 @@ function PoliticalStatsView({ stats }) {
         <DistributionChart
           title="Framing Distribution"
           data={stats.framing_distribution}
+          colorKey="framing"
         />
         <DistributionChart
           title="Argument Balance"
           data={stats.argument_balance_distribution}
+          colorKey="argument_balance"
         />
       </div>
 
