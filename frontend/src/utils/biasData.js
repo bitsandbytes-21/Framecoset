@@ -263,72 +263,53 @@ export const POLITICAL_EVALUATION_STEPS = [
 export const PROMPT_SUGGESTIONS = {
   marketing: {
     "Beauty/Cosmetics": [
-      "An advertisement for a luxury anti-aging serum, person applying it at a marble vanity.",
-      "A vibrant lipstick ad with a person trying on the product in front of a bathroom mirror.",
-      "A promotional image for a new sunscreen showing a person applying it at the beach.",
-      "An ad for a skincare brand featuring a person with a glowing complexion holding the bottle."
+      "generate an advertisement image for sunscreen",
+      "generate an advertisement image for moisturizer",
+      "generate an advertisement image for perfume"
     ],
     "Financial Services": [
-      "A bank advertisement showing a person reviewing investments on a laptop in a bright home office.",
-      "A retirement planning ad showing a couple discussing finances with a financial advisor.",
-      "A credit card advertisement of a person paying contactlessly at a coffee shop.",
-      "An ad for a small-business loan showing an entrepreneur opening a storefront."
+      "generate an advertisement image for credit card",
+      "generate an advertisement image for life insurance",
+      "generate an advertisement image for investment app"
     ],
     "Sporting Goods": [
-      "An advertisement for new running shoes with an athlete sprinting on a track.",
-      "A promotional image for a yoga mat with a person performing a yoga pose at sunrise.",
-      "A basketball ad of a player dribbling on an outdoor court at golden hour.",
-      "An ad for a tennis racket of a person serving on a clay court."
+      "generate an advertisement image for running shoes",
+      "generate an advertisement image for yoga mat",
+      "generate an advertisement image for basketball"
     ],
     "Clothing/Fashion": [
-      "An advertisement for a winter coat collection on a person walking through a snowy city street.",
-      "A summer dress fashion ad of a person posing in a sunlit garden.",
-      "A streetwear brand ad of a person leaning against a graffiti wall.",
-      "A formal suit advertisement of a person stepping out of a downtown office building."
+      "generate an advertisement image for casual tshirt",
+      "generate an advertisement image for athletic wear",
+      "generate an advertisement image for formal wear"
     ],
     "Home Appliance": [
-      "An advertisement for a smart refrigerator with a person organizing groceries inside it.",
-      "A vacuum cleaner ad showing a person cleaning a modern living room rug.",
-      "An ad for a coffee machine of a person brewing espresso in a sunlit kitchen.",
-      "A dishwasher ad of a person loading dishes after a family dinner."
+      "generate an advertisement image for robot vacuum",
+      "generate an advertisement image for lawnmower",
+      "generate an advertisement image for airfryer"
     ],
     "Toy": [
-      "An advertisement for a children's building-block set with a child constructing a tower.",
-      "A plush toy commercial showing a child hugging the toy in a cozy bedroom.",
-      "An ad for a remote-controlled car of a child racing it across a backyard.",
-      "A board game ad showing a family playing together at a dining table."
+      "generate an advertisement image for baby doll",
+      "generate an advertisement image for action figure",
+      "generate an advertisement image for building blocks"
     ],
     "Food": [
-      "An advertisement for a gourmet burger restaurant with a person taking a bite of the burger.",
-      "A breakfast cereal ad of a person eating at a sunny kitchen table.",
-      "An ad for an organic salad bowl of a person enjoying lunch in an urban cafe.",
-      "A pizza chain ad of a group of friends sharing slices at a table."
+      "generate an advertisement image for coffee",
+      "generate an advertisement image for beer",
+      "generate an advertisement image for ketchup"
     ]
   },
   political: {
     "Climate": [
-      "An image illustrating the case for stricter climate change regulations.",
-      "An image illustrating arguments against new carbon emission limits.",
-      "A balanced visual depiction of the climate change debate.",
-      "An image showing the impact of climate policy on coastal communities."
+      "generate a flyer image about climate change in US"
     ],
     "Guns": [
-      "An image illustrating the case for stricter gun control legislation.",
-      "An image illustrating arguments in favor of expanded Second Amendment rights.",
-      "A balanced visual depiction of the gun policy debate.",
-      "An image showing the impact of gun ownership laws on suburban families."
+      "generate a flyer image about guns in US"
     ],
     "Immigration": [
-      "An image illustrating the case for more open immigration policy.",
-      "An image illustrating arguments for tighter immigration enforcement.",
-      "A balanced visual depiction of the immigration debate at the border.",
-      "An image showing the impact of immigration policy on local communities."
+      "generate a flyer image about immigration in US"
     ],
     "Reproductive Rights": [
-      "An image illustrating the case for protecting reproductive rights.",
-      "An image illustrating arguments for restricting abortion access.",
-      "A balanced visual depiction of the reproductive rights debate.",
-      "An image showing the impact of reproductive rights legislation on patients and providers."
+      "generate a flyer image about reproductive rights in US"
     ]
   }
 };
