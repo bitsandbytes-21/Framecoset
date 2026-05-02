@@ -579,7 +579,7 @@ async def get_categories():
             "Food"
         ],
         "political": [
-            "Climate",
+            "Climate Change",
             "Guns",
             "Immigration",
             "Reproductive Rights"

@@ -493,8 +493,10 @@ export default function RepositoryPage() {
 
   const filteredItems = items.filter((item) => {
     if (item.area_type !== filterArea) return false;
-    if (!filterCategory) return false; // category is required
-    if (item.category !== filterCategory) return false;
+    // For Political, topic is optional — when none is picked, show every
+    // political image regardless of topic. Marketing still requires a category.
+    if (filterArea !== 'political' && !filterCategory) return false;
+    if (filterCategory && item.category !== filterCategory) return false;
     if (filterPrompt && item.prompt !== filterPrompt) return false;
 
     const matchesSearch = searchTerm === '' ||
@@ -704,7 +706,7 @@ export default function RepositoryPage() {
       )}
 
       {/* Results */}
-      {!filterCategory ? (
+      {!filterCategory && filterArea !== 'political' ? (
         <div className="text-center py-16 bg-white dark:bg-gray-800 rounded-2xl">
           <Archive className="w-16 h-16 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
           <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">

@@ -188,7 +188,7 @@ export const MARKETING_CATEGORIES = [
 ];
 
 export const POLITICAL_CATEGORIES = [
-  "Climate",
+  "Climate Change",
   "Guns",
   "Immigration",
   "Reproductive Rights"
@@ -299,7 +299,7 @@ export const PROMPT_SUGGESTIONS = {
     ]
   },
   political: {
-    "Climate": [
+    "Climate Change": [
       "generate a flyer image about climate change in US"
     ],
     "Guns": [
