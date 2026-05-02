@@ -493,9 +493,8 @@ export default function RepositoryPage() {
 
   const filteredItems = items.filter((item) => {
     if (item.area_type !== filterArea) return false;
-    // For Political, topic is optional — when none is picked, show every
-    // political image regardless of topic. Marketing still requires a category.
-    if (filterArea !== 'political' && !filterCategory) return false;
+    // Category is optional for both areas — when none is picked, show all
+    // images for the chosen area. If a category is selected, filter by it.
     if (filterCategory && item.category !== filterCategory) return false;
     if (filterPrompt && item.prompt !== filterPrompt) return false;
 
@@ -706,17 +705,7 @@ export default function RepositoryPage() {
       )}
 
       {/* Results */}
-      {!filterCategory && filterArea !== 'political' ? (
-        <div className="text-center py-16 bg-white dark:bg-gray-800 rounded-2xl">
-          <Archive className="w-16 h-16 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
-          <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">
-            Select a {categoryLabel.toLowerCase()} to view
-          </h3>
-          <p className="text-gray-500 dark:text-gray-500">
-            Choose a {filterArea} {categoryLabel.toLowerCase()} above to see the evaluations in it.
-          </p>
-        </div>
-      ) : filteredItems.length === 0 ? (
+      {filteredItems.length === 0 ? (
         <div className="text-center py-16">
           <Archive className="w-16 h-16 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
           <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">
