@@ -44,6 +44,11 @@ export const getPoliticalRepository = async () => {
   return response.data;
 };
 
+export const getUnannotated = async () => {
+  const response = await api.get('/unannotated');
+  return response.data;
+};
+
 // Fetch every evaluation submitted against a single piece of content. Used by
 // the Stats page when a user clicks an image to see all annotators' scores.
 export const getContentEvaluations = async (contentId, areaType = 'marketing') => {

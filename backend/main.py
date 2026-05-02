@@ -994,6 +994,74 @@ async def get_repository():
     }
 
 
+@app.get("/api/unannotated")
+async def get_unannotated_content():
+    """Return generated content that has not yet received any evaluation.
+
+    Fetches all rows from ``generated_content``, collects every content_id
+    that appears in either evaluation table, then returns the difference so
+    the repository can surface images that are waiting for annotation.
+    """
+    all_content: List[Dict[str, Any]] = []
+    evaluated_ids: set = set()
+
+    if supabase:
+        try:
+            content_result = (
+                supabase.table("generated_content")
+                .select("*")
+                .order("created_at", desc=True)
+                .execute()
+            )
+            all_content = content_result.data or []
+        except Exception as e:
+            print(f"Supabase generated_content fetch error: {e}")
+            all_content = list(in_memory_storage.get("generated_content", []))
+
+        for table in ["evaluations", "political_evaluations"]:
+            try:
+                result = supabase.table(table).select("content_id").execute()
+                for row in result.data or []:
+                    if row.get("content_id"):
+                        evaluated_ids.add(row["content_id"])
+            except Exception as e:
+                print(f"Supabase {table} content_id fetch error: {e}")
+                storage_key = table
+                for ev in in_memory_storage.get(storage_key, []):
+                    if ev.get("content_id"):
+                        evaluated_ids.add(ev["content_id"])
+    else:
+        all_content = list(in_memory_storage.get("generated_content", []))
+        for ev in in_memory_storage.get("evaluations", []):
+            if ev.get("content_id"):
+                evaluated_ids.add(ev["content_id"])
+        for ev in in_memory_storage.get("political_evaluations", []):
+            if ev.get("content_id"):
+                evaluated_ids.add(ev["content_id"])
+
+    unannotated = [
+        {
+            "id": item["id"],
+            "content_id": item["id"],
+            "url": item.get("url"),
+            "prompt": item.get("prompt"),
+            "model_name": item.get("model_name"),
+            "tier": item.get("tier"),
+            "media_type": item.get("media_type"),
+            "area_type": item.get("area_type"),
+            "category": item.get("category"),
+            "evaluations": [],
+            "evaluation_count": 0,
+            "is_unannotated": True,
+            "created_at": item.get("created_at"),
+        }
+        for item in all_content
+        if item.get("id") and item["id"] not in evaluated_ids
+    ]
+
+    return {"items": unannotated}
+
+
 @app.get("/api/content/{content_id}/evaluations")
 async def get_content_evaluations(content_id: str, area_type: str = "marketing"):
     """Return every evaluation submitted against a single piece of content.

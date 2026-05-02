@@ -5,7 +5,7 @@ import {
   BarChart3,
 } from 'lucide-react';
 import {
-  getRepository, getPoliticalRepository,
+  getRepository, getPoliticalRepository, getUnannotated,
   getStats, getPoliticalStats,
   downloadEvaluationsExcel, checkEvaluation,
 } from '../utils/api';
@@ -222,10 +222,18 @@ function ContentCard({ item, currentUserId, onEvaluate, onImageClick }) {
         </div>
 
         <div className="flex items-center gap-2 text-sm mb-3">
-          <Users className="w-4 h-4 text-gray-400" />
-          <span className="text-gray-700 dark:text-gray-300">
-            {evalCount} {evalCount === 1 ? 'evaluation' : 'evaluations'}
-          </span>
+          {item.is_unannotated ? (
+            <span className="px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+              Pending Annotation
+            </span>
+          ) : (
+            <>
+              <Users className="w-4 h-4 text-gray-400" />
+              <span className="text-gray-700 dark:text-gray-300">
+                {evalCount} {evalCount === 1 ? 'evaluation' : 'evaluations'}
+              </span>
+            </>
+          )}
         </div>
 
         {/* Action buttons — Evaluate is the new repository-side CTA so any
@@ -247,17 +255,19 @@ function ContentCard({ item, currentUserId, onEvaluate, onImageClick }) {
             {userHasEvaluated ? 'Already evaluated by you' : 'Evaluate this image'}
           </button>
 
-          <button
-            type="button"
-            onClick={() => setShowDetails((s) => !s)}
-            className="w-full flex items-center justify-center gap-2 py-2 text-sm text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded-lg transition-colors"
-          >
-            {showDetails ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-            {showDetails ? 'Hide all evaluations' : `View all ${evalCount} evaluation${evalCount === 1 ? '' : 's'}`}
-          </button>
+          {!item.is_unannotated && (
+            <button
+              type="button"
+              onClick={() => setShowDetails((s) => !s)}
+              className="w-full flex items-center justify-center gap-2 py-2 text-sm text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded-lg transition-colors"
+            >
+              {showDetails ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              {showDetails ? 'Hide all evaluations' : `View all ${evalCount} evaluation${evalCount === 1 ? '' : 's'}`}
+            </button>
+          )}
         </div>
 
-        {showDetails && (
+        {showDetails && !item.is_unannotated && (
           <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 space-y-3">
             <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
               All annotators
@@ -272,7 +282,9 @@ function ContentCard({ item, currentUserId, onEvaluate, onImageClick }) {
 
         <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
           <p className="text-xs text-gray-400">
-            Last evaluated: {item.latest_evaluated_at ? new Date(item.latest_evaluated_at).toLocaleString() : '—'}
+            {item.is_unannotated
+              ? `Generated: ${item.created_at ? new Date(item.created_at).toLocaleString() : '—'}`
+              : `Last evaluated: ${item.latest_evaluated_at ? new Date(item.latest_evaluated_at).toLocaleString() : '—'}`}
           </p>
         </div>
       </div>
@@ -394,9 +406,10 @@ export default function RepositoryPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const [marketing, political] = await Promise.all([
+      const [marketing, political, unannotatedData] = await Promise.all([
         getRepository(),
         getPoliticalRepository(),
+        getUnannotated(),
       ]);
 
       // Backend returns `items` (grouped). Tag area_type defensively in case
@@ -404,7 +417,18 @@ export default function RepositoryPage() {
       const marketingItems = (marketing?.items || []).map((it) => ({ ...it, area_type: it.area_type || 'marketing' }));
       const politicalItems = (political?.items || []).map((it) => ({ ...it, area_type: it.area_type || 'political' }));
 
-      setItems([...marketingItems, ...politicalItems]);
+      // Unannotated items already have area_type from generated_content.
+      // Deduplicate: once an item gets its first evaluation it will appear in
+      // marketingItems/politicalItems — don't show it twice.
+      const evaluatedIds = new Set([
+        ...marketingItems.map((it) => it.content_id || it.id),
+        ...politicalItems.map((it) => it.content_id || it.id),
+      ]);
+      const unannotatedItems = (unannotatedData?.items || []).filter(
+        (it) => !evaluatedIds.has(it.content_id || it.id)
+      );
+
+      setItems([...marketingItems, ...politicalItems, ...unannotatedItems]);
     } catch (err) {
       console.error('Error fetching repository:', err);
       setError('Failed to load repository data');
@@ -504,12 +528,14 @@ export default function RepositoryPage() {
 
     const matchesTier = filterTier === 'all' || item.tier === filterTier;
 
-    // For grouped content, "with humans" means at least one annotator marked
-    // has_human=true; "without humans" means every annotator said no.
+    // Unannotated items have no evaluation data yet — exclude them from the
+    // has-human sub-filters since the answer is unknown.
     let matchesHuman = true;
     if (filterHasHuman === 'yes') {
+      if (item.is_unannotated) return false;
       matchesHuman = (item.evaluations || []).some((e) => e.has_human);
     } else if (filterHasHuman === 'no') {
+      if (item.is_unannotated) return false;
       matchesHuman = (item.evaluations || []).every((e) => e.has_human === false);
     }
 
