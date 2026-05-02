@@ -162,9 +162,10 @@ BIAS_CODES = {
 # API routing for image generation
 OPENAI_IMAGE_MODELS = {"DALL-E 3", "GPT Image"}
 RECRAFT_IMAGE_MODELS = {"Recraft V3"}
-BFL_IMAGE_MODELS = {"Flux Dev"}
+BFL_IMAGE_MODELS = set()
 IDEOGRAM_IMAGE_MODELS = {"Ideogram v2"}
 FAL_IMAGE_MODELS = {
+    "Flux Dev":      "fal-ai/flux/dev",
     "Z-Image-Turbo": "fal-ai/z-image/turbo",
 }
 REPLICATE_IMAGE_MODELS = {
