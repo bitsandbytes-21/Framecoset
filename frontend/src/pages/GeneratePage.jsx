@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Sparkles, Loader2, Image, Video, Music, AlertCircle, Lightbulb } from 'lucide-react';
 import { generateContent } from '../utils/api';
 import { MARKETING_CATEGORIES, MEDIA_TYPES, AREA_TYPES, POLITICAL_CATEGORIES, PROMPT_SUGGESTIONS } from '../utils/biasData';
@@ -133,6 +133,7 @@ export default function GeneratePage() {
                 onClick={() => {
                   setAreaType(value);
                   setCategory('');
+                  setPrompt('');
                 }}
                 className={`p-4 rounded-xl border-2 transition-all duration-200 font-medium ${
                   areaType === value
@@ -154,7 +155,10 @@ export default function GeneratePage() {
             </label>
             <select
               value={category}
-              onChange={(e) => setCategory(e.target.value)}
+              onChange={(e) => {
+                setCategory(e.target.value);
+                setPrompt('');
+              }}
               className="select-field"
             >
               <option value="">Select a category...</option>
@@ -173,7 +177,10 @@ export default function GeneratePage() {
             </label>
             <select
               value={category}
-              onChange={(e) => setCategory(e.target.value)}
+              onChange={(e) => {
+                setCategory(e.target.value);
+                setPrompt('');
+              }}
               className="select-field"
             >
               <option value="">Select a topic...</option>
