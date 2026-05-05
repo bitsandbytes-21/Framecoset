@@ -93,7 +93,7 @@ MODELS = {
     "image": {
         "premium": ["DALL-E 3", "Recraft V3", "GPT Image", "Imagen 4"],
         "mid_tier": ["Flux Dev", "Playground v2.5", "Z-Image-Turbo", "Ideogram v2"],
-        "open_source": ["Stable Diffusion 3.5", "Kandinsky 3", "Kolors", "PixArt-Σ"]
+        "open_source": ["Stable Diffusion 3.5", "Kandinsky 3", "Qwen Image", "Wan 2.7"]
     },
     "video": {
         "premium": ["Runway Gen 4", "Veo 3.1"],
@@ -172,11 +172,14 @@ FAL_IMAGE_MODEL_ARGS = {}
 REPLICATE_IMAGE_MODELS = {
     "Playground v2.5": "playgroundai/playground-v2.5-1024px-aesthetic",
     "Kandinsky 3":     "ai-forever/kandinsky-3",
-    "Kolors":          "kwai-kolors/kolors",
-    "PixArt-Σ":        "nateraw/pixart-sigma",
 }
 STABILITY_IMAGE_MODELS = {"Stable Diffusion 3.5"}
 GOOGLE_IMAGE_MODELS = {"Imagen 4"}
+# Tier-gated on pollinations.ai — requires POLLINATIONS_TOKEN.
+POLLINATIONS_IMAGE_MODELS = {
+    "Qwen Image": "qwen-image",
+    "Wan 2.7":    "wan-2.7",
+}
 
 
 # Pydantic Models
@@ -444,6 +447,40 @@ async def generate_with_ideogram_model(prompt: str, content_id: str) -> str:
     return permanent or temp_url
 
 
+async def generate_with_pollinations_model(prompt: str, content_id: str, model_id: str) -> str:
+    """Generate image via pollinations.ai.
+
+    Tier-gated models (qwen-image, wan, …) require a Bearer token from
+    https://auth.pollinations.ai. Without the token, pollinations silently
+    falls back to a generic placeholder image — so we treat a missing
+    token as a hard failure rather than letting a placeholder slip into
+    the dataset.
+    """
+    token = os.getenv("POLLINATIONS_TOKEN")
+    if not token:
+        raise RuntimeError("billing_required: POLLINATIONS_TOKEN missing — Qwen/Wan are tier-gated on pollinations.ai")
+    encoded = urllib.parse.quote(prompt, safe="")
+    url = (
+        f"https://image.pollinations.ai/prompt/{encoded}"
+        f"?model={urllib.parse.quote(model_id)}"
+        f"&width=1024&height=1024&nologo=true"
+    )
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            url,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=120.0,
+            follow_redirects=True,
+        )
+        response.raise_for_status()
+        if not response.content or len(response.content) < 100:
+            raise RuntimeError(f"Empty/invalid response from pollinations.ai for {model_id}")
+        permanent = await upload_bytes_to_cloudinary(response.content, content_id)
+        if not permanent:
+            raise RuntimeError("Cloudinary upload failed for pollinations.ai output")
+        return permanent
+
+
 async def generate_with_fal_model(prompt: str, content_id: str, fal_endpoint: str, extra_args: dict = None) -> str:
     """Generate image using a fal.ai-hosted model."""
     import fal_client
@@ -600,6 +637,10 @@ async def _generate_one_model(
             elif model_name in REPLICATE_IMAGE_MODELS:
                 final_url = await generate_with_replicate_model(
                     prompt, content_id, REPLICATE_IMAGE_MODELS[model_name]
+                )
+            elif model_name in POLLINATIONS_IMAGE_MODELS:
+                final_url = await generate_with_pollinations_model(
+                    prompt, content_id, POLLINATIONS_IMAGE_MODELS[model_name]
                 )
             elif model_name in STABILITY_IMAGE_MODELS:
                 final_url = await generate_with_stability_model(prompt, content_id)

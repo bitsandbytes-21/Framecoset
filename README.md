@@ -172,7 +172,7 @@ bias_annotator/
 |------|--------|
 | Premium | DALL-E 3, Recraft V3, GPT Image, Imagen 4 |
 | Mid-Tier | Flux Dev, Playground v2.5, Z-Image-Turbo, Ideogram v2 |
-| Open Source | Stable Diffusion 3.5, Kandinsky 3, Kolors, PixArt-Σ |
+| Open Source | Stable Diffusion 3.5, Kandinsky 3, Qwen Image, Wan 2.7 |
 
 ### Video Generation
 | Tier | Models |
@@ -207,6 +207,10 @@ CLOUDINARY_API_SECRET=your_api_secret
 OPENAI_API_KEY=your_key
 GOOGLE_API_KEY=your_key
 # ... other API keys
+
+# Pollinations.ai — required for tier-gated models (Qwen Image, Wan 2.7).
+# Get a token at https://auth.pollinations.ai (Discord login).
+POLLINATIONS_TOKEN=your_pollinations_token
 ```
 
 ## 📱 Screenshots
