@@ -103,7 +103,7 @@ function ContentCard({ item, onEvaluate }) {
       try {
         const userId = localStorage.getItem('userId');
         if (userId) {
-          const result = await checkEvaluation(item.id, userId);
+          const result = await checkEvaluation(item.id, userId, item.area_type);
           setIsEvaluated(result.evaluated);
         }
       } catch (error) {
@@ -114,7 +114,7 @@ function ContentCard({ item, onEvaluate }) {
     };
 
     checkStatus();
-  }, [item.id]);
+  }, [item.id, item.area_type]);
 
   const handleEvaluate = () => {
     if (!isEvaluated) {

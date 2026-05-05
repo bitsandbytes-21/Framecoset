@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Archive, Search, Loader2, AlertCircle, Download,
   ChevronDown, ChevronUp, ClipboardCheck, CheckCircle, Users,
@@ -7,7 +7,7 @@ import {
 import {
   getRepository, getPoliticalRepository, getUnannotated,
   getStats, getPoliticalStats,
-  downloadEvaluationsExcel, checkEvaluation,
+  downloadEvaluationsExcel,
 } from '../utils/api';
 import {
   BIAS_OPTIONS, POLITICAL_BIAS_OPTIONS,
@@ -444,6 +444,7 @@ export default function RepositoryPage() {
   useEffect(() => {
     setFilterCategory('');
     setFilterPrompt('');
+    setFilterHasHuman('all');
   }, [filterArea]);
 
   // Changing the category clears the prompt — prompts are scoped to a category.
@@ -528,15 +529,15 @@ export default function RepositoryPage() {
 
     const matchesTier = filterTier === 'all' || item.tier === filterTier;
 
-    // Unannotated items have no evaluation data yet — exclude them from the
-    // has-human sub-filters since the answer is unknown.
+    // has_human is a marketing-only field; skip this filter for political items.
     let matchesHuman = true;
-    if (filterHasHuman === 'yes') {
+    if (filterHasHuman !== 'all' && item.area_type !== 'political') {
       if (item.is_unannotated) return false;
-      matchesHuman = (item.evaluations || []).some((e) => e.has_human);
-    } else if (filterHasHuman === 'no') {
-      if (item.is_unannotated) return false;
-      matchesHuman = (item.evaluations || []).every((e) => e.has_human === false);
+      if (filterHasHuman === 'yes') {
+        matchesHuman = (item.evaluations || []).some((e) => e.has_human);
+      } else if (filterHasHuman === 'no') {
+        matchesHuman = (item.evaluations || []).every((e) => e.has_human === false);
+      }
     }
 
     return matchesSearch && matchesTier && matchesHuman;
@@ -711,12 +712,33 @@ export default function RepositoryPage() {
             <option value="mid_tier">Mid-Tier</option>
             <option value="open_source">Open Source</option>
           </select>
-          <select value={filterHasHuman} onChange={(e) => setFilterHasHuman(e.target.value)} className="select-field md:w-48">
-            <option value="all">All Content</option>
-            <option value="yes">With Humans</option>
-            <option value="no">Without Humans</option>
-          </select>
+          {!isPolitical && (
+            <select value={filterHasHuman} onChange={(e) => setFilterHasHuman(e.target.value)} className="select-field md:w-48">
+              <option value="all">All Content</option>
+              <option value="yes">With Humans</option>
+              <option value="no">Without Humans</option>
+            </select>
+          )}
         </div>
+      </div>
+
+      {/* Active filter summary — shows current selections and item count */}
+      <div className="flex items-center gap-2 flex-wrap text-sm text-gray-500 dark:text-gray-400">
+        <span>Showing</span>
+        <span className="font-semibold text-gray-800 dark:text-gray-100">
+          {filteredItems.length} item{filteredItems.length !== 1 ? 's' : ''}
+        </span>
+        {filterCategory && (
+          <>
+            <span>in</span>
+            <span className="px-2 py-0.5 rounded-full bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300 font-medium">
+              {filterCategory}
+            </span>
+          </>
+        )}
+        {!filterCategory && (
+          <span className="italic">across all {filterArea} categories</span>
+        )}
       </div>
 
       {/* Inline stats panel — only mounted when explicitly toggled on AND a
