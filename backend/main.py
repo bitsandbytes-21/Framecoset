@@ -162,22 +162,18 @@ BIAS_CODES = {
 # API routing for image generation
 OPENAI_IMAGE_MODELS = {"DALL-E 3", "GPT Image"}
 RECRAFT_IMAGE_MODELS = {"Recraft V3"}
-BFL_IMAGE_MODELS = set()
 IDEOGRAM_IMAGE_MODELS = {"Ideogram v2"}
 FAL_IMAGE_MODELS = {
     "Flux Dev":      "fal-ai/flux/dev",
     "Z-Image-Turbo": "fal-ai/z-image/turbo",
 }
-FAL_IMAGE_MODEL_ARGS: dict = {}
-
-# HuggingFace Inference API — free tier (needs HF_TOKEN env var)
-HF_IMAGE_MODELS = {
-    "Kandinsky 3": "kandinsky-community/kandinsky-3",
-    "Kolors":      "Kwai-Kolors/Kolors",
-    "PixArt-Σ":   "PixArt-alpha/PixArt-Sigma-XL-2-1024-MS",
-}
+# Per-model argument overrides for fal.ai (only needed when defaults differ)
+FAL_IMAGE_MODEL_ARGS = {}
 REPLICATE_IMAGE_MODELS = {
     "Playground v2.5": "playgroundai/playground-v2.5-1024px-aesthetic",
+    "Kandinsky 3":     "ai-forever/kandinsky-3",
+    "Kolors":          "kwai-kolors/kolors",
+    "PixArt-Σ":        "nateraw/pixart-sigma",
 }
 STABILITY_IMAGE_MODELS = {"Stable Diffusion 3.5"}
 GOOGLE_IMAGE_MODELS = {"Imagen 4"}
@@ -327,18 +323,24 @@ async def generate_with_openai_model(prompt: str, model: str) -> str:
         return permanent or temp_url
 
 
-async def generate_with_replicate_model(prompt: str, replicate_model_id: str) -> str:
-    """Generate image using a Replicate-hosted model."""
+async def generate_with_replicate_model(prompt: str, content_id: str, replicate_model_id: str) -> str:
+    """Generate image using a Replicate-hosted model.
+
+    Replicate output URLs (replicate.delivery/...) are short-lived, so the
+    result is rehosted on Cloudinary for permanence — matching every other
+    provider in this file.
+    """
     import replicate as replicate_sdk
     output = await replicate_sdk.async_run(
         replicate_model_id,
         input={"prompt": prompt},
     )
-    if isinstance(output, list) and output:
-        return str(output[0])
-    if output:
-        return str(output)
-    raise RuntimeError(f"Empty output from Replicate model: {replicate_model_id}")
+    item = output[0] if isinstance(output, list) and output else output
+    if not item:
+        raise RuntimeError(f"Empty output from Replicate model: {replicate_model_id}")
+    temp_url = getattr(item, "url", None) or str(item)
+    permanent = await upload_to_cloudinary(temp_url, content_id)
+    return permanent or temp_url
 
 
 async def generate_with_stability_model(prompt: str, content_id: str) -> str:
@@ -416,35 +418,6 @@ async def generate_with_recraft_model(prompt: str, content_id: str) -> str:
     return permanent or temp_url
 
 
-async def generate_with_bfl_flux(prompt: str, content_id: str) -> str:
-    """Generate image using Flux Dev via Black Forest Labs official API (async polling)."""
-    api_key = os.getenv("BFL_API_KEY")
-    headers = {"x-key": api_key, "accept": "application/json"}
-    async with httpx.AsyncClient() as client:
-        submit = await client.post(
-            "https://api.bfl.ai/v1/flux-dev",
-            headers=headers,
-            json={"prompt": prompt, "width": 1024, "height": 1024},
-            timeout=30.0,
-        )
-        submit.raise_for_status()
-        polling_url = submit.json()["polling_url"]
-
-        for _ in range(60):
-            await asyncio.sleep(1.5)
-            poll = await client.get(polling_url, headers=headers, timeout=30.0)
-            poll.raise_for_status()
-            data = poll.json()
-            status = data.get("status")
-            if status == "Ready":
-                temp_url = data["result"]["sample"]
-                permanent = await upload_to_cloudinary(temp_url, content_id)
-                return permanent or temp_url
-            if status in ("Error", "Failed", "Content Moderated", "Request Moderated"):
-                raise RuntimeError(f"BFL Flux Dev failed: {status}")
-        raise RuntimeError("BFL Flux Dev timed out waiting for result")
-
-
 async def generate_with_ideogram_model(prompt: str, content_id: str) -> str:
     """Generate image using Ideogram v2 via Ideogram's official API."""
     api_key = os.getenv("IDEOGRAM_API_KEY")
@@ -494,45 +467,6 @@ async def generate_with_fal_model(prompt: str, content_id: str, fal_endpoint: st
         raise RuntimeError(f"Empty output from fal.ai endpoint: {fal_endpoint}")
     permanent = await upload_to_cloudinary(temp_url, content_id)
     return permanent or temp_url
-
-
-async def generate_with_hf_model(prompt: str, content_id: str, hf_model_id: str) -> str:
-    """Generate image via HuggingFace Inference API (free tier).
-
-    X-Wait-For-Model tells HF to block until the model is loaded rather than
-    returning 503 immediately on cold start — this was the main failure mode
-    in the previous implementation.
-    """
-    hf_token = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_API_KEY") or ""
-    if not hf_token:
-        raise RuntimeError("HF_TOKEN not set")
-    headers = {
-        "Authorization": f"Bearer {hf_token}",
-        "X-Wait-For-Model": "true",
-    }
-    async with httpx.AsyncClient() as client:
-        for attempt in range(3):
-            response = await client.post(
-                f"https://api-inference.huggingface.co/models/{hf_model_id}",
-                headers=headers,
-                json={"inputs": prompt},
-                timeout=180.0,
-            )
-            if response.status_code == 503:
-                await asyncio.sleep(15 * (attempt + 1))
-                continue
-            response.raise_for_status()
-            ct = response.headers.get("content-type", "")
-            if "application/json" in ct:
-                err = response.json()
-                raise RuntimeError(f"HF API error: {err.get('error', err)}")
-            break
-        else:
-            raise RuntimeError(f"HF model {hf_model_id} still loading after retries")
-    permanent = await upload_bytes_to_cloudinary(response.content, content_id)
-    if not permanent:
-        raise RuntimeError(f"Cloudinary upload failed for HF model {hf_model_id}")
-    return permanent
 
 
 def classify_generation_error(model_name: str, error: Exception) -> Dict[str, str]:
@@ -656,8 +590,6 @@ async def _generate_one_model(
                 final_url = await generate_with_openai_model(prompt, model_name)
             elif model_name in RECRAFT_IMAGE_MODELS:
                 final_url = await generate_with_recraft_model(prompt, content_id)
-            elif model_name in BFL_IMAGE_MODELS:
-                final_url = await generate_with_bfl_flux(prompt, content_id)
             elif model_name in IDEOGRAM_IMAGE_MODELS:
                 final_url = await generate_with_ideogram_model(prompt, content_id)
             elif model_name in FAL_IMAGE_MODELS:
@@ -665,13 +597,9 @@ async def _generate_one_model(
                     prompt, content_id, FAL_IMAGE_MODELS[model_name],
                     FAL_IMAGE_MODEL_ARGS.get(model_name)
                 )
-            elif model_name in HF_IMAGE_MODELS:
-                final_url = await generate_with_hf_model(
-                    prompt, content_id, HF_IMAGE_MODELS[model_name]
-                )
             elif model_name in REPLICATE_IMAGE_MODELS:
                 final_url = await generate_with_replicate_model(
-                    prompt, REPLICATE_IMAGE_MODELS[model_name]
+                    prompt, content_id, REPLICATE_IMAGE_MODELS[model_name]
                 )
             elif model_name in STABILITY_IMAGE_MODELS:
                 final_url = await generate_with_stability_model(prompt, content_id)
