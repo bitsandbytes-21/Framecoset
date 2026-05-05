@@ -27,11 +27,6 @@ if _active_replicate:
     print(f"[startup] Replicate token loaded: {_active_replicate[:6]}…{_active_replicate[-4:]} (len={len(_active_replicate)})")
 else:
     print("[startup] WARNING: no Replicate token found in env")
-_hf_token = os.getenv("HF_TOKEN") or ""
-if _hf_token:
-    print(f"[startup] HuggingFace token loaded (len={len(_hf_token)})")
-else:
-    print("[startup] WARNING: no HuggingFace token found — HF models will fail")
 
 app = FastAPI(title="Bias Annotator API", version="1.0.0")
 
@@ -172,14 +167,12 @@ IDEOGRAM_IMAGE_MODELS = {"Ideogram v2"}
 FAL_IMAGE_MODELS = {
     "Flux Dev":      "fal-ai/flux/dev",
     "Z-Image-Turbo": "fal-ai/z-image/turbo",
-}
-HF_IMAGE_MODELS = {
-    "Kandinsky 3": "kandinsky-community/kandinsky-3",
-    "Kolors":      "Kwai-Kolors/Kolors",
-    "PixArt-Σ":   "PixArt-alpha/PixArt-Sigma-XL-2-1024-MS",
+    "Kolors":        "fal-ai/kolors",
+    "PixArt-Σ":     "fal-ai/pixart-sigma",
 }
 REPLICATE_IMAGE_MODELS = {
     "Playground v2.5": "playgroundai/playground-v2.5-1024px-aesthetic",
+    "Kandinsky 3":     "ai-forever/kandinsky-3",
 }
 STABILITY_IMAGE_MODELS = {"Stable Diffusion 3.5"}
 GOOGLE_IMAGE_MODELS = {"Imagen 4"}
@@ -341,23 +334,6 @@ async def generate_with_replicate_model(prompt: str, replicate_model_id: str) ->
     if output:
         return str(output)
     raise RuntimeError(f"Empty output from Replicate model: {replicate_model_id}")
-
-
-async def generate_with_huggingface_model(prompt: str, content_id: str, hf_model_id: str) -> str:
-    """Generate image via HuggingFace Inference API and upload to Cloudinary."""
-    import requests as req
-    hf_token = os.getenv("HF_TOKEN") or ""
-    def _call():
-        r = req.post(
-            f"https://api-inference.huggingface.co/models/{hf_model_id}",
-            headers={"Authorization": f"Bearer {hf_token}"},
-            json={"inputs": prompt},
-            timeout=120,
-        )
-        r.raise_for_status()
-        return r.content
-    image_bytes = await asyncio.to_thread(_call)
-    return await upload_bytes_to_cloudinary(image_bytes, content_id)
 
 
 async def generate_with_stability_model(prompt: str, content_id: str) -> str:
@@ -640,10 +616,6 @@ async def _generate_one_model(
             elif model_name in FAL_IMAGE_MODELS:
                 final_url = await generate_with_fal_model(
                     prompt, content_id, FAL_IMAGE_MODELS[model_name]
-                )
-            elif model_name in HF_IMAGE_MODELS:
-                final_url = await generate_with_huggingface_model(
-                    prompt, content_id, HF_IMAGE_MODELS[model_name]
                 )
             elif model_name in REPLICATE_IMAGE_MODELS:
                 final_url = await generate_with_replicate_model(
