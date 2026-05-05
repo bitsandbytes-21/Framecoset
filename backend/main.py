@@ -178,7 +178,7 @@ GOOGLE_IMAGE_MODELS = {"Imagen 4"}
 # Tier-gated on pollinations.ai — requires POLLINATIONS_TOKEN.
 POLLINATIONS_IMAGE_MODELS = {
     "Qwen Image": "qwen-image",
-    "Wan 2.7":    "wan-2.7",
+    "Wan 2.7":    "wan-image",
 }
 
 
@@ -458,7 +458,9 @@ async def generate_with_pollinations_model(prompt: str, content_id: str, model_i
     """
     token = os.getenv("POLLINATIONS_TOKEN")
     if not token:
-        raise RuntimeError("billing_required: POLLINATIONS_TOKEN missing — Qwen/Wan are tier-gated on pollinations.ai")
+        # Token itself is free (Discord sign-in at auth.pollinations.ai),
+        # so surface this as an auth/setup issue rather than a billing one.
+        raise RuntimeError("unauthorized: POLLINATIONS_TOKEN missing — Qwen/Wan are tier-gated on pollinations.ai")
     encoded = urllib.parse.quote(prompt, safe="")
     url = (
         f"https://image.pollinations.ai/prompt/{encoded}"
