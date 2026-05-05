@@ -93,7 +93,7 @@ MODELS = {
     "image": {
         "premium": ["DALL-E 3", "Recraft V3", "GPT Image", "Imagen 4"],
         "mid_tier": ["Flux Dev", "Playground v2.5", "Z-Image-Turbo", "Ideogram v2"],
-        "open_source": ["Stable Diffusion 3.5", "HiDream", "AuraFlow", "HunyuanImage"]
+        "open_source": ["Stable Diffusion 3.5", "Kandinsky 3", "Kolors", "PixArt-Σ"]
     },
     "video": {
         "premium": ["Runway Gen 4", "Veo 3.1"],
@@ -167,13 +167,14 @@ IDEOGRAM_IMAGE_MODELS = {"Ideogram v2"}
 FAL_IMAGE_MODELS = {
     "Flux Dev":      "fal-ai/flux/dev",
     "Z-Image-Turbo": "fal-ai/z-image/turbo",
-    "HiDream":       "fal-ai/hidream-i1-full",
-    "AuraFlow":      "fal-ai/aura-flow",
-    "HunyuanImage":  "fal-ai/hunyuan-image/v3/text-to-image",
 }
-# Per-model argument overrides for fal.ai (only needed when defaults differ)
-FAL_IMAGE_MODEL_ARGS = {
-    "HunyuanImage": {"aspect_ratio": "1:1"},
+FAL_IMAGE_MODEL_ARGS: dict = {}
+
+# HuggingFace Inference API — free tier (needs HF_TOKEN env var)
+HF_IMAGE_MODELS = {
+    "Kandinsky 3": "kandinsky-community/kandinsky-3",
+    "Kolors":      "Kwai-Kolors/Kolors",
+    "PixArt-Σ":   "PixArt-alpha/PixArt-Sigma-XL-2-1024-MS",
 }
 REPLICATE_IMAGE_MODELS = {
     "Playground v2.5": "playgroundai/playground-v2.5-1024px-aesthetic",
@@ -495,6 +496,45 @@ async def generate_with_fal_model(prompt: str, content_id: str, fal_endpoint: st
     return permanent or temp_url
 
 
+async def generate_with_hf_model(prompt: str, content_id: str, hf_model_id: str) -> str:
+    """Generate image via HuggingFace Inference API (free tier).
+
+    X-Wait-For-Model tells HF to block until the model is loaded rather than
+    returning 503 immediately on cold start — this was the main failure mode
+    in the previous implementation.
+    """
+    hf_token = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_API_KEY") or ""
+    if not hf_token:
+        raise RuntimeError("HF_TOKEN not set")
+    headers = {
+        "Authorization": f"Bearer {hf_token}",
+        "X-Wait-For-Model": "true",
+    }
+    async with httpx.AsyncClient() as client:
+        for attempt in range(3):
+            response = await client.post(
+                f"https://api-inference.huggingface.co/models/{hf_model_id}",
+                headers=headers,
+                json={"inputs": prompt},
+                timeout=180.0,
+            )
+            if response.status_code == 503:
+                await asyncio.sleep(15 * (attempt + 1))
+                continue
+            response.raise_for_status()
+            ct = response.headers.get("content-type", "")
+            if "application/json" in ct:
+                err = response.json()
+                raise RuntimeError(f"HF API error: {err.get('error', err)}")
+            break
+        else:
+            raise RuntimeError(f"HF model {hf_model_id} still loading after retries")
+    permanent = await upload_bytes_to_cloudinary(response.content, content_id)
+    if not permanent:
+        raise RuntimeError(f"Cloudinary upload failed for HF model {hf_model_id}")
+    return permanent
+
+
 def classify_generation_error(model_name: str, error: Exception) -> Dict[str, str]:
     """Map a provider exception to a user-facing reason + message.
 
@@ -624,6 +664,10 @@ async def _generate_one_model(
                 final_url = await generate_with_fal_model(
                     prompt, content_id, FAL_IMAGE_MODELS[model_name],
                     FAL_IMAGE_MODEL_ARGS.get(model_name)
+                )
+            elif model_name in HF_IMAGE_MODELS:
+                final_url = await generate_with_hf_model(
+                    prompt, content_id, HF_IMAGE_MODELS[model_name]
                 )
             elif model_name in REPLICATE_IMAGE_MODELS:
                 final_url = await generate_with_replicate_model(
