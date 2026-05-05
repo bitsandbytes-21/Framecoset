@@ -93,7 +93,7 @@ MODELS = {
     "image": {
         "premium": ["DALL-E 3", "Recraft V3", "GPT Image", "Imagen 4"],
         "mid_tier": ["Flux Dev", "Playground v2.5", "Z-Image-Turbo", "Ideogram v2"],
-        "open_source": ["Stable Diffusion 3.5", "Kandinsky 3", "Kolors", "PixArt-Σ"]
+        "open_source": ["Stable Diffusion 3.5", "HiDream", "AuraFlow", "HunyuanImage"]
     },
     "video": {
         "premium": ["Runway Gen 4", "Veo 3.1"],
@@ -167,12 +167,16 @@ IDEOGRAM_IMAGE_MODELS = {"Ideogram v2"}
 FAL_IMAGE_MODELS = {
     "Flux Dev":      "fal-ai/flux/dev",
     "Z-Image-Turbo": "fal-ai/z-image/turbo",
-    "Kolors":        "fal-ai/kolors",
-    "PixArt-Σ":     "fal-ai/pixart-sigma",
+    "HiDream":       "fal-ai/hidream-i1-full",
+    "AuraFlow":      "fal-ai/aura-flow",
+    "HunyuanImage":  "fal-ai/hunyuan-image/v3/text-to-image",
+}
+# Per-model argument overrides for fal.ai (only needed when defaults differ)
+FAL_IMAGE_MODEL_ARGS = {
+    "HunyuanImage": {"aspect_ratio": "1:1"},
 }
 REPLICATE_IMAGE_MODELS = {
     "Playground v2.5": "playgroundai/playground-v2.5-1024px-aesthetic",
-    "Kandinsky 3":     "ai-forever/kandinsky-3",
 }
 STABILITY_IMAGE_MODELS = {"Stable Diffusion 3.5"}
 GOOGLE_IMAGE_MODELS = {"Imagen 4"}
@@ -466,13 +470,16 @@ async def generate_with_ideogram_model(prompt: str, content_id: str) -> str:
     return permanent or temp_url
 
 
-async def generate_with_fal_model(prompt: str, content_id: str, fal_endpoint: str) -> str:
-    """Generate image using a fal.ai-hosted model (e.g. Z-Image-Turbo)."""
+async def generate_with_fal_model(prompt: str, content_id: str, fal_endpoint: str, extra_args: dict = None) -> str:
+    """Generate image using a fal.ai-hosted model."""
     import fal_client
+    args = {"prompt": prompt, "image_size": "square_hd"}
+    if extra_args:
+        args.update(extra_args)
     handler = await asyncio.to_thread(
         fal_client.submit,
         fal_endpoint,
-        arguments={"prompt": prompt, "image_size": "square_hd"},
+        arguments=args,
     )
     result = await asyncio.to_thread(handler.get)
     images = result.get("images") or result.get("image")
@@ -615,7 +622,8 @@ async def _generate_one_model(
                 final_url = await generate_with_ideogram_model(prompt, content_id)
             elif model_name in FAL_IMAGE_MODELS:
                 final_url = await generate_with_fal_model(
-                    prompt, content_id, FAL_IMAGE_MODELS[model_name]
+                    prompt, content_id, FAL_IMAGE_MODELS[model_name],
+                    FAL_IMAGE_MODEL_ARGS.get(model_name)
                 )
             elif model_name in REPLICATE_IMAGE_MODELS:
                 final_url = await generate_with_replicate_model(
