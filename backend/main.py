@@ -177,8 +177,13 @@ STABILITY_IMAGE_MODELS = {"Stable Diffusion 3.5"}
 GOOGLE_IMAGE_MODELS = {"Imagen 4"}
 # Tier-gated on pollinations.ai — requires POLLINATIONS_TOKEN.
 POLLINATIONS_IMAGE_MODELS = {
-    "Qwen Image": "qwen-image",
-    "Wan 2.7":    "wan-image",
+    "Wan 2.7": "wan-image",
+}
+# HuggingFace Inference Providers — requires HF_TOKEN with
+# 'Make calls to Inference Providers' permission. Provider is auto-selected
+# (Qwen-Image currently routes through fal-ai under the hood).
+HUGGINGFACE_IMAGE_MODELS = {
+    "Qwen Image": "Qwen/Qwen-Image",
 }
 
 
@@ -450,7 +455,7 @@ async def generate_with_ideogram_model(prompt: str, content_id: str) -> str:
 async def generate_with_pollinations_model(prompt: str, content_id: str, model_id: str) -> str:
     """Generate image via pollinations.ai.
 
-    Tier-gated models (qwen-image, wan, …) require a Bearer token from
+    Tier-gated models (wan-image, …) require a Bearer token from
     https://auth.pollinations.ai. Without the token, pollinations silently
     falls back to a generic placeholder image — so we treat a missing
     token as a hard failure rather than letting a placeholder slip into
@@ -460,7 +465,7 @@ async def generate_with_pollinations_model(prompt: str, content_id: str, model_i
     if not token:
         # Token itself is free (Discord sign-in at auth.pollinations.ai),
         # so surface this as an auth/setup issue rather than a billing one.
-        raise RuntimeError("unauthorized: POLLINATIONS_TOKEN missing — Qwen/Wan are tier-gated on pollinations.ai")
+        raise RuntimeError("unauthorized: POLLINATIONS_TOKEN missing — Wan is tier-gated on pollinations.ai")
     encoded = urllib.parse.quote(prompt, safe="")
     url = (
         f"https://image.pollinations.ai/prompt/{encoded}"
@@ -481,6 +486,53 @@ async def generate_with_pollinations_model(prompt: str, content_id: str, model_i
         if not permanent:
             raise RuntimeError("Cloudinary upload failed for pollinations.ai output")
         return permanent
+
+
+async def generate_with_huggingface_model(prompt: str, content_id: str, model_id: str) -> str:
+    """Generate image via HuggingFace Inference Providers.
+
+    Uses provider="auto" so HF picks the fastest available backend
+    (Qwen-Image currently routes through fal-ai). Free-tier credits apply
+    per HF account; on quota exhaustion HF returns 402, which we surface
+    as a billing_required failure to the caller.
+    """
+    from huggingface_hub import InferenceClient
+    from huggingface_hub.errors import HfHubHTTPError
+
+    token = os.getenv("HF_TOKEN")
+    if not token:
+        raise RuntimeError(
+            "unauthorized: HF_TOKEN missing — create one at "
+            "https://huggingface.co/settings/tokens with "
+            "'Make calls to Inference Providers' permission"
+        )
+
+    client = InferenceClient(api_key=token)
+    try:
+        image = await asyncio.to_thread(
+            client.text_to_image,
+            prompt,
+            model=model_id,
+        )
+    except HfHubHTTPError as e:
+        status = getattr(e.response, "status_code", None)
+        if status == 402:
+            raise RuntimeError(f"billing_required: HuggingFace free credits exhausted for {model_id}")
+        if status in (401, 403):
+            raise RuntimeError(f"unauthorized: HF_TOKEN rejected for {model_id} ({status})")
+        raise
+
+    import io
+    buf = io.BytesIO()
+    image.save(buf, format="PNG")
+    image_bytes = buf.getvalue()
+    if not image_bytes or len(image_bytes) < 100:
+        raise RuntimeError(f"Empty/invalid response from HuggingFace for {model_id}")
+
+    permanent = await upload_bytes_to_cloudinary(image_bytes, content_id)
+    if not permanent:
+        raise RuntimeError("Cloudinary upload failed for HuggingFace output")
+    return permanent
 
 
 async def generate_with_fal_model(prompt: str, content_id: str, fal_endpoint: str, extra_args: dict = None) -> str:
@@ -643,6 +695,10 @@ async def _generate_one_model(
             elif model_name in POLLINATIONS_IMAGE_MODELS:
                 final_url = await generate_with_pollinations_model(
                     prompt, content_id, POLLINATIONS_IMAGE_MODELS[model_name]
+                )
+            elif model_name in HUGGINGFACE_IMAGE_MODELS:
+                final_url = await generate_with_huggingface_model(
+                    prompt, content_id, HUGGINGFACE_IMAGE_MODELS[model_name]
                 )
             elif model_name in STABILITY_IMAGE_MODELS:
                 final_url = await generate_with_stability_model(prompt, content_id)
