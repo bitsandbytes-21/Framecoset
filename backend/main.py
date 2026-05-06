@@ -180,10 +180,11 @@ POLLINATIONS_IMAGE_MODELS = {
     "Wan 2.7": "wan-image",
 }
 # HuggingFace Inference Providers — requires HF_TOKEN with
-# 'Make calls to Inference Providers' permission. Provider is auto-selected
-# (Qwen-Image currently routes through fal-ai under the hood).
+# 'Make calls to Inference Providers' permission. Each entry pins a specific
+# upstream provider (auto-routing skips providers not enabled in the account).
+# Format: model_name -> (hf_model_id, provider).
 HUGGINGFACE_IMAGE_MODELS = {
-    "Qwen Image": "Qwen/Qwen-Image",
+    "Qwen Image": ("Qwen/Qwen-Image", "fal-ai"),
 }
 
 
@@ -488,13 +489,13 @@ async def generate_with_pollinations_model(prompt: str, content_id: str, model_i
         return permanent
 
 
-async def generate_with_huggingface_model(prompt: str, content_id: str, model_id: str) -> str:
+async def generate_with_huggingface_model(prompt: str, content_id: str, model_id: str, provider: str) -> str:
     """Generate image via HuggingFace Inference Providers.
 
-    Uses provider="auto" so HF picks the fastest available backend
-    (Qwen-Image currently routes through fal-ai). Free-tier credits apply
-    per HF account; on quota exhaustion HF returns 402, which we surface
-    as a billing_required failure to the caller.
+    Pins an explicit upstream provider (e.g. "fal-ai") rather than relying on
+    provider="auto", which silently skips providers not enabled in the HF
+    account and surfaces as "model not available". Free-tier credits apply
+    per HF account; quota exhaustion returns 402, mapped to billing_required.
     """
     from huggingface_hub import InferenceClient
     from huggingface_hub.errors import HfHubHTTPError
@@ -507,7 +508,7 @@ async def generate_with_huggingface_model(prompt: str, content_id: str, model_id
             "'Make calls to Inference Providers' permission"
         )
 
-    client = InferenceClient(api_key=token)
+    client = InferenceClient(provider=provider, api_key=token)
     try:
         image = await asyncio.to_thread(
             client.text_to_image,
@@ -517,9 +518,9 @@ async def generate_with_huggingface_model(prompt: str, content_id: str, model_id
     except HfHubHTTPError as e:
         status = getattr(e.response, "status_code", None)
         if status == 402:
-            raise RuntimeError(f"billing_required: HuggingFace free credits exhausted for {model_id}")
+            raise RuntimeError(f"billing_required: HuggingFace free credits exhausted for {model_id} via {provider}")
         if status in (401, 403):
-            raise RuntimeError(f"unauthorized: HF_TOKEN rejected for {model_id} ({status})")
+            raise RuntimeError(f"unauthorized: HF_TOKEN rejected for {model_id} via {provider} ({status})")
         raise
 
     import io
@@ -697,8 +698,9 @@ async def _generate_one_model(
                     prompt, content_id, POLLINATIONS_IMAGE_MODELS[model_name]
                 )
             elif model_name in HUGGINGFACE_IMAGE_MODELS:
+                hf_model_id, hf_provider = HUGGINGFACE_IMAGE_MODELS[model_name]
                 final_url = await generate_with_huggingface_model(
-                    prompt, content_id, HUGGINGFACE_IMAGE_MODELS[model_name]
+                    prompt, content_id, hf_model_id, hf_provider
                 )
             elif model_name in STABILITY_IMAGE_MODELS:
                 final_url = await generate_with_stability_model(prompt, content_id)
