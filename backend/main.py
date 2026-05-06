@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 from supabase import create_client, Client
 import urllib.parse
 import json
+import secrets
 
 load_dotenv(override=True)
 
@@ -468,10 +469,15 @@ async def generate_with_pollinations_model(prompt: str, content_id: str, model_i
         # so surface this as an auth/setup issue rather than a billing one.
         raise RuntimeError("unauthorized: POLLINATIONS_TOKEN missing — Wan is tier-gated on pollinations.ai")
     encoded = urllib.parse.quote(prompt, safe="")
+    # pollinations.ai caches by full URL — without a per-call seed, repeated
+    # (prompt, model) pairs return the same cached image. Randomize the seed
+    # so each generation is distinct.
+    seed = secrets.randbits(32)
     url = (
         f"https://image.pollinations.ai/prompt/{encoded}"
         f"?model={urllib.parse.quote(model_id)}"
         f"&width=1024&height=1024&nologo=true"
+        f"&seed={seed}"
     )
     async with httpx.AsyncClient() as client:
         response = await client.get(
